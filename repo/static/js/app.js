@@ -15,10 +15,13 @@
 
 import { API }                          from './api.js';
 
-// ---- HTMX: forward JWT token on every HTMX request ---------------------
+// ---- HTMX: cookies are sent automatically (same-origin, SameSite=Strict).
+// No Bearer header injection needed. The listener is retained as a no-op
+// stub so any HTMX request that was given an explicit header elsewhere
+// still works without error.
 document.addEventListener('htmx:configRequest', evt => {
-  const token = API.getToken();
-  if (token) evt.detail.headers['Authorization'] = `Bearer ${token}`;
+  // httpOnly cookie is forwarded by the browser automatically.
+  // Nothing extra to do here.
 });
 import { renderAuth }                   from './auth.js';
 import { renderDashboard }              from './dashboard.js';
@@ -430,8 +433,10 @@ function renderAppShell(user) {
   </div>
 </div>`;
 
-  el('btn-logout').addEventListener('click', () => {
-    API.clearToken();
+  el('btn-logout').addEventListener('click', async () => {
+    // POST /auth/logout clears the httpOnly cookie server-side.
+    // API.logout() also clears sessionStorage user data, preventing role leakage.
+    await API.logout();
     boot();
   });
 
@@ -447,14 +452,13 @@ function renderAppShell(user) {
 
 // ---- Boot ---------------------------------------------------------------
 async function boot() {
-  if (!API.getToken()) {
-    renderAuth(user => { API.saveUser(user); renderAppShell(user); });
-    return;
-  }
-  // Verify token still valid
+  // Token lives in an httpOnly cookie — not readable by JS.
+  // Probe /auth/me directly: the browser sends the cookie automatically.
+  // 200 → already authenticated; 401 → not logged in or cookie expired.
   const { ok, data } = await API.get('/auth/me');
   if (!ok) {
-    API.clearToken();
+    // Clear any stale user data to prevent role leakage when switching users.
+    API.clearUser();
     renderAuth(user => { API.saveUser(user); renderAppShell(user); });
     return;
   }

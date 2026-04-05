@@ -480,6 +480,18 @@ def _migrate(conn):
          "ALTER TABLE matching_profiles ADD COLUMN preferred_time_slots TEXT NOT NULL DEFAULT '[]'"),
         ("matching_profiles", "category",
          "ALTER TABLE matching_profiles ADD COLUMN category TEXT"),
+        # Temporary do-not-match list support
+        ("blacklist", "is_temporary",
+         "ALTER TABLE blacklist ADD COLUMN is_temporary INTEGER NOT NULL DEFAULT 0"),
+        ("blacklist", "expires_at",
+         "ALTER TABLE blacklist ADD COLUMN expires_at TEXT"),
+        # Session resource dimensions (building / room / time-slot scoping)
+        ("sessions", "building",
+         "ALTER TABLE sessions ADD COLUMN building TEXT"),
+        ("sessions", "room",
+         "ALTER TABLE sessions ADD COLUMN room TEXT"),
+        ("sessions", "time_slot",
+         "ALTER TABLE sessions ADD COLUMN time_slot TEXT"),
     ]
     existing_cols = {}
     for table, col, sql in migrations:

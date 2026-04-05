@@ -14,7 +14,7 @@ Governance rules (enforced server-side):
 import json
 from datetime import datetime, timezone, timedelta
 
-from app.services.guards import guard_can_act, guard_is_active
+from app.services.guards import guard_can_act, guard_is_active, guard_is_verified
 from app.dal import matching_dal, session_dal, audit_dal, user_dal
 from app.utils import utcnow
 
@@ -111,7 +111,12 @@ def search_peers(conn, requester_id: int, skill: str = '',
 def request_session(conn, initiator_id: int, participant_id: int,
                     description: str, duration_minutes: int,
                     credit_amount: float, scheduled_at: str,
-                    idempotency_key: str = None) -> int:
+                    idempotency_key: str = None,
+                    building: str = None, room: str = None,
+                    time_slot: str = None) -> int:
+    ok, reason = guard_is_verified(conn, initiator_id)
+    if not ok:
+        raise PermissionError(reason)
     ok, reason = guard_can_act(conn, initiator_id)
     if not ok:
         raise PermissionError(reason)
@@ -124,12 +129,13 @@ def request_session(conn, initiator_id: int, participant_id: int,
         raise LookupError('Participant not found or inactive.')
 
     if matching_dal.is_blocked(conn, initiator_id, participant_id):
-        raise PermissionError('Cannot create a session with a blocked user.')
+        raise ValueError('Cannot create a session with a blocked user.')
 
     session_id = session_dal.create(
         conn, initiator_id, participant_id,
         description, duration_minutes, credit_amount,
-        scheduled_at, idempotency_key
+        scheduled_at, idempotency_key,
+        building=building, room=room, time_slot=time_slot
     )
     audit_dal.write(conn, 'SESSION_REQUESTED', user_id=initiator_id,
                     entity_type='session', entity_id=session_id)
@@ -163,6 +169,9 @@ def update_session_status(conn, session_id: int, actor_id: int,
 
 def join_queue(conn, user_id: int, skill: str,
                priority: int = 0, expires_at: str = None) -> int:
+    ok, reason = guard_is_verified(conn, user_id)
+    if not ok:
+        raise PermissionError(reason)
     ok, reason = guard_can_act(conn, user_id)
     if not ok:
         raise PermissionError(reason)
@@ -231,6 +240,9 @@ def auto_match(conn, user_id: int, skill: str) -> dict | None:
     Manual auto-match trigger (POST /queue/match).
     Returns the matched queue entry dict, or None if no match found.
     """
+    ok, reason = guard_is_verified(conn, user_id)
+    if not ok:
+        raise PermissionError(reason)
     ok, reason = guard_can_act(conn, user_id)
     if not ok:
         raise PermissionError(reason)
@@ -288,6 +300,13 @@ def run_auto_match_cycle(conn) -> dict:
         if last_attempt and last_attempt >= cooldown_cutoff:
             continue
 
+        # Expire entries whose owner is not (or is no longer) verified
+        ok_ver, _ = guard_is_verified(conn, user_id)
+        if not ok_ver:
+            matching_dal.update_queue_entry(conn, entry_id, status='expired')
+            expired += 1
+            continue
+
         # Expire entries that have exceeded max retries
         if retry_count >= MAX_RETRIES:
             matching_dal.update_queue_entry(conn, entry_id, status='expired')
@@ -330,6 +349,35 @@ def run_auto_match_cycle(conn) -> dict:
 
 
 # ---- Blacklist ----------------------------------------------------------
+
+def block_user_temporary(conn, blocker_id: int, blocked_id: int,
+                          reason: str = None,
+                          duration_hours: float = None,
+                          expires_at: str = None) -> None:
+    """
+    Add a temporary do-not-match entry that expires automatically.
+    Provide either duration_hours (e.g. 24.0) or an explicit ISO-8601 expires_at.
+    After expiry the block is ignored by match lookup but the row remains
+    for audit purposes until the user manually removes it.
+    """
+    ok, r = guard_is_active(conn, blocker_id)
+    if not ok:
+        raise PermissionError(r)
+    if blocker_id == blocked_id:
+        raise ValueError('Cannot block yourself.')
+    if not duration_hours and not expires_at:
+        raise ValueError('Either duration_hours or expires_at is required.')
+
+    if duration_hours and not expires_at:
+        exp_dt = datetime.now(timezone.utc) + timedelta(hours=float(duration_hours))
+        expires_at = exp_dt.isoformat()
+
+    matching_dal.add_block(conn, blocker_id, blocked_id, reason,
+                           is_temporary=True, expires_at=expires_at)
+    audit_dal.write(conn, 'USER_BLOCKED_TEMPORARILY', user_id=blocker_id,
+                    entity_type='user', entity_id=blocked_id,
+                    details={'expires_at': expires_at, 'reason': reason})
+
 
 def block_user(conn, blocker_id: int, blocked_id: int,
                reason: str = None) -> None:

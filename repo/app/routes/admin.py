@@ -185,18 +185,28 @@ def list_sessions():
         except PermissionError as e:
             return jsonify({'error': str(e)}), 403
 
-        # Extract time-slot constraints from scope (fine-grained resource control)
+        # Extract resource-dimension constraints from scope
+        # (fine-grained admin access control: building / room / time-slot)
         scheduled_after  = None
         scheduled_before = None
+        buildings        = None
+        rooms            = None
+        time_slots       = None
         if scope:
             scheduled_after  = scope.get('scheduled_after')
             scheduled_before = scope.get('scheduled_before')
+            buildings        = scope.get('buildings')   # list[str] | None
+            rooms            = scope.get('rooms')       # list[str] | None
+            time_slots       = scope.get('time_slots')  # list[str] | None
 
         rows, total = session_dal.list_all(
             conn,
             status=request.args.get('status'),
             scheduled_after=scheduled_after,
             scheduled_before=scheduled_before,
+            buildings=buildings,
+            rooms=rooms,
+            time_slots=time_slots,
             limit=per_page, offset=(page - 1) * per_page,
         )
     return jsonify({'sessions': rows, 'total': total}), 200

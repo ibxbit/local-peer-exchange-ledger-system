@@ -1,10 +1,11 @@
-"""Auth routes — register, login, /me, change-password."""
+"""Auth routes — register, login, logout, /me, change-password."""
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, make_response
 from app.models import db
 from app.utils import login_required, mask_email
 from app.services import auth_service
 from app.dal import user_dal
+from config import Config
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -46,7 +47,29 @@ def login():
         return jsonify({'error': str(e)}), 429
     except ValueError as e:
         return jsonify({'error': str(e)}), 401
-    return jsonify(result), 200
+
+    resp = make_response(jsonify(result), 200)
+    # Set the JWT in an httpOnly cookie so JS cannot read it (XSS protection).
+    # SameSite=Strict prevents CSRF for same-origin requests.
+    # secure=False here (HTTP dev); set to True when deploying over HTTPS.
+    resp.set_cookie(
+        'pex_session',
+        result['token'],
+        httponly=True,
+        samesite='Strict',
+        max_age=int(Config.JWT_EXPIRY_HOURS * 3600),
+        secure=False,
+        path='/',
+    )
+    return resp
+
+
+@auth_bp.route('/logout', methods=['POST'])
+def logout():
+    """Clear the httpOnly session cookie and invalidate client state."""
+    resp = make_response(jsonify({'message': 'Logged out successfully.'}), 200)
+    resp.delete_cookie('pex_session', path='/', samesite='Strict')
+    return resp
 
 
 @auth_bp.route('/me', methods=['GET'])

@@ -25,6 +25,18 @@ def _credit_user(conn, uid, amount=500.0):
     conn.commit()
 
 
+def _verify_user(conn, user_id, admin_id):
+    """Insert a verified identity record so the user passes guard_is_verified."""
+    conn.execute(
+        "INSERT INTO identity_verifications "
+        "(user_id, document_type, document_data_enc, document_fingerprint, "
+        " content_type, file_size_bytes, status, submitted_at, reviewed_at, reviewer_id) "
+        "VALUES (?, 'passport', 'enc', 'fp', 'image/jpeg', 512, 'verified', ?, ?, ?)",
+        (user_id, utcnow(), utcnow(), admin_id)
+    )
+    conn.commit()
+
+
 def _make_profile(conn, uid, skills_offered=None, skill_str='python'):
     skills_offered = skills_offered or [skill_str]
     matching_dal.upsert_profile(
@@ -131,6 +143,11 @@ class TestExtendedProfile:
 # ---- Queue governance tests ---------------------------------------------
 
 class TestQueueGovernance:
+    @pytest.fixture(autouse=True)
+    def _auto_verify(self, conn, user_id, user2_id, admin_id):
+        """Verification is now mandatory — pre-verify both users for all queue tests."""
+        _verify_user(conn, user_id, admin_id)
+        _verify_user(conn, user2_id, admin_id)
 
     def test_join_queue_success(self, conn, user_id):
         _credit_user(conn, user_id)
@@ -196,6 +213,11 @@ class TestQueueGovernance:
 # ---- Auto-match cycle (scheduler) tests ---------------------------------
 
 class TestAutoMatchCycle:
+    @pytest.fixture(autouse=True)
+    def _auto_verify(self, conn, user_id, user2_id, admin_id):
+        """Auto-match cycle now requires verified users — pre-verify both."""
+        _verify_user(conn, user_id, admin_id)
+        _verify_user(conn, user2_id, admin_id)
 
     def test_expire_timed_out_entries(self, conn, user_id, user2_id):
         _credit_user(conn, user_id)

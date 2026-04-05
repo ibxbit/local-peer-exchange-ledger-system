@@ -122,11 +122,22 @@ def list_queue(conn, user_id: int = None, status: str = None,
 
 # ---- Blacklist ----------------------------------------------------------
 
-def add_block(conn, blocker_id: int, blocked_id: int, reason: str = None) -> None:
+def add_block(conn, blocker_id: int, blocked_id: int, reason: str = None,
+              is_temporary: bool = False, expires_at: str = None) -> None:
+    """
+    Insert or replace a block entry.
+    For temporary blocks set is_temporary=True and provide expires_at (ISO-8601).
+    Permanent blocks (is_temporary=False) never expire regardless of expires_at.
+    """
     conn.execute(
-        'INSERT OR IGNORE INTO blacklist (blocker_id, blocked_id, reason, created_at) '
-        'VALUES (?, ?, ?, ?)',
-        (blocker_id, blocked_id, reason, utcnow())
+        'INSERT INTO blacklist '
+        '(blocker_id, blocked_id, reason, is_temporary, expires_at, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?) '
+        'ON CONFLICT(blocker_id, blocked_id) DO UPDATE SET '
+        'reason=excluded.reason, is_temporary=excluded.is_temporary, '
+        'expires_at=excluded.expires_at, created_at=excluded.created_at',
+        (blocker_id, blocked_id, reason, 1 if is_temporary else 0,
+         expires_at, utcnow())
     )
 
 
@@ -138,21 +149,33 @@ def remove_block(conn, blocker_id: int, blocked_id: int) -> None:
 
 
 def get_blocked_ids(conn, user_id: int) -> set:
-    """IDs that user_id has blocked OR that have blocked user_id."""
+    """
+    IDs blocked by user_id or blocking user_id.
+    Expired temporary blocks are silently excluded.
+    """
+    now = utcnow()
     rows = conn.execute(
-        'SELECT blocked_id FROM blacklist WHERE blocker_id = ? '
-        'UNION SELECT blocker_id FROM blacklist WHERE blocked_id = ?',
-        (user_id, user_id)
+        'SELECT blocked_id AS other_id FROM blacklist '
+        'WHERE blocker_id = ? '
+        '  AND (is_temporary = 0 OR expires_at IS NULL OR expires_at > ?) '
+        'UNION '
+        'SELECT blocker_id AS other_id FROM blacklist '
+        'WHERE blocked_id = ? '
+        '  AND (is_temporary = 0 OR expires_at IS NULL OR expires_at > ?)',
+        (user_id, now, user_id, now)
     ).fetchall()
     return {r[0] for r in rows}
 
 
 def is_blocked(conn, user_a: int, user_b: int) -> bool:
+    """Check bidirectional block, excluding expired temporary blocks."""
+    now = utcnow()
     row = conn.execute(
         'SELECT 1 FROM blacklist '
-        'WHERE (blocker_id = ? AND blocked_id = ?) '
-        '   OR (blocker_id = ? AND blocked_id = ?)',
-        (user_a, user_b, user_b, user_a)
+        'WHERE ((blocker_id = ? AND blocked_id = ?) '
+        '   OR  (blocker_id = ? AND blocked_id = ?)) '
+        '  AND (is_temporary = 0 OR expires_at IS NULL OR expires_at > ?)',
+        (user_a, user_b, user_b, user_a, now)
     ).fetchone()
     return row is not None
 
@@ -197,9 +220,17 @@ def get_waiting_entries(conn) -> list:
 
 
 def list_blocks(conn, blocker_id: int) -> list:
-    return rows_to_list(conn.execute(
+    now = utcnow()
+    rows = rows_to_list(conn.execute(
         'SELECT bl.*, u.username as blocked_username '
         'FROM blacklist bl JOIN users u ON bl.blocked_id = u.id '
         'WHERE bl.blocker_id = ? ORDER BY bl.id DESC',
         (blocker_id,)
     ).fetchall())
+    # Annotate each entry with whether it is currently active
+    for r in rows:
+        if r.get('is_temporary') and r.get('expires_at'):
+            r['is_active_block'] = r['expires_at'] > now
+        else:
+            r['is_active_block'] = True
+    return rows

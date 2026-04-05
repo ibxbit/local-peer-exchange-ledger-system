@@ -192,10 +192,12 @@ def decode_token(token: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def _get_token_from_request() -> str | None:
+    # 1. Bearer header — API clients and existing tests (backward compatible)
     auth = request.headers.get('Authorization', '')
     if auth.startswith('Bearer '):
         return auth[7:]
-    return None
+    # 2. httpOnly cookie — browser clients (more secure; not accessible to JS)
+    return request.cookies.get('pex_session')
 
 
 def login_required(f):

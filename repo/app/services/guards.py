@@ -66,6 +66,24 @@ def guard_can_act(conn, user_id: int) -> tuple[bool, str]:
     return True, ''
 
 
+def guard_is_verified(conn, user_id: int) -> tuple[bool, str]:
+    """
+    Returns (allowed, reason).
+    Enforces that the user has a verified identity record before any
+    matching action (queue join, session request, manual match trigger).
+    This check sits in the shared guard path and cannot be bypassed by
+    calling matching routes directly.
+    """
+    from app.dal import verification_dal
+    rec = verification_dal.get_latest_for_user(conn, user_id)
+    if rec and rec['status'] == 'verified':
+        return True, ''
+    return False, (
+        'Identity verification is required before using matching features. '
+        'Please submit your documents for review at Settings → Verification.'
+    )
+
+
 def guard_is_active(conn, user_id: int) -> tuple[bool, str]:
     """Lightweight check — only verifies the account is not banned."""
     user = user_dal.get_by_id(conn, user_id)

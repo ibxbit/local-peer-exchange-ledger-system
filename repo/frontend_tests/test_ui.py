@@ -52,6 +52,26 @@ class TestSPAShell:
         resp = client.get('/static/css/style.css')
         assert b'htmx-indicator' in resp.data
 
+    def test_api_js_uses_credentials_same_origin(self, client):
+        """api.js must include credentials:'same-origin' for cookie auth."""
+        resp = client.get('/static/js/api.js')
+        body = resp.data.decode()
+        assert 'same-origin' in body
+
+    def test_api_js_no_localstorage_token(self, client):
+        """api.js must NOT store the token in localStorage (security)."""
+        resp = client.get('/static/js/api.js')
+        body = resp.data.decode()
+        # Should not set the token in localStorage
+        assert 'localStorage.setItem' not in body
+
+    def test_api_js_logout_function_present(self, client):
+        """api.js must expose a logout() method that POSTs to /auth/logout."""
+        resp = client.get('/static/js/api.js')
+        body = resp.data.decode()
+        assert 'logout' in body
+        assert '/auth/logout' in body
+
 
 # ---- Auth flow ----------------------------------------------------------
 

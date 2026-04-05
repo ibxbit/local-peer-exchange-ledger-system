@@ -1,42 +1,65 @@
 /**
  * api.js — Centralised HTTP client.
- * Manages the JWT token and wraps fetch with auth headers.
+ *
+ * Auth hardening: JWT is stored in an httpOnly cookie set by the server on
+ * login.  JavaScript cannot read it (XSS protection).  The browser sends it
+ * automatically on every same-origin request (credentials:'same-origin').
+ *
+ * Non-sensitive user metadata (username, role, etc.) is cached in
+ * sessionStorage so the UI can personalise without a round-trip.
+ * sessionStorage is cleared on tab close and is isolated per-tab, so
+ * switching users in different tabs cannot leak roles.
+ *
+ * Backward compatibility: Bearer tokens in Authorization headers are still
+ * accepted server-side for API clients and existing tests.
  */
 
-const TOKEN_KEY = 'pex_token';
-const USER_KEY  = 'pex_user';
+const USER_KEY = 'pex_user';
 
 export const API = {
-  _token: localStorage.getItem(TOKEN_KEY),
+  // Token lives only in the httpOnly cookie — not accessible to JS.
+  // These stubs keep call-sites that were written against the old
+  // localStorage token API working without modification.
+  getToken()   { return null; },
+  setToken()   { /* no-op: server sets the cookie on login */ },
+  clearToken() { /* use API.logout() to clear the server-side cookie */ },
 
-  setToken(t)   { this._token = t; localStorage.setItem(TOKEN_KEY, t); },
-  clearToken()  { this._token = null; localStorage.removeItem(TOKEN_KEY);
-                  localStorage.removeItem(USER_KEY); },
-  getToken()    { return this._token; },
+  saveUser(u)  { sessionStorage.setItem(USER_KEY, JSON.stringify(u)); },
+  loadUser()   {
+    try { return JSON.parse(sessionStorage.getItem(USER_KEY)); }
+    catch { return null; }
+  },
+  clearUser()  { sessionStorage.removeItem(USER_KEY); },
 
-  saveUser(u)   { localStorage.setItem(USER_KEY, JSON.stringify(u)); },
-  loadUser()    { try { return JSON.parse(localStorage.getItem(USER_KEY)); }
-                  catch { return null; } },
+  /**
+   * Call POST /auth/logout to clear the httpOnly cookie, then wipe local state.
+   * Callers should navigate to the login screen after this resolves.
+   */
+  async logout() {
+    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); }
+    catch (_) { /* network error — clear local state regardless */ }
+    this.clearUser();
+  },
 
   /**
    * Core request method.
+   * credentials:'same-origin' ensures the httpOnly cookie is sent automatically.
    * @returns {{ ok, status, data }}
    */
   async req(method, path, body = null, opts = {}) {
     const headers = { 'Content-Type': 'application/json' };
-    if (this._token) headers['Authorization'] = `Bearer ${this._token}`;
     if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
 
-    const fetchOpts = { method, headers };
+    const fetchOpts = { method, headers, credentials: 'same-origin' };
     if (body !== null) fetchOpts.body = JSON.stringify(body);
 
     try {
       const res  = await fetch('/api' + path, fetchOpts);
       const data = await res.json().catch(() => ({}));
 
-      // Automatically handle token expiry
+      // Auto-logout on 401: clear local state and reload to show login screen.
       if (res.status === 401 && path !== '/auth/login') {
-        this.clearToken();
+        this.clearUser();
         window.location.reload();
       }
       return { ok: res.ok, status: res.status, data };

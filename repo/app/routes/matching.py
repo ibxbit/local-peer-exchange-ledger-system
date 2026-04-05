@@ -286,6 +286,9 @@ def request_session():
                 credit_amount=credit_amount,
                 scheduled_at=d.get('scheduled_at'),
                 idempotency_key=ikey,
+                building=(d.get('building') or '').strip()[:64] or None,
+                room=(d.get('room') or '').strip()[:64] or None,
+                time_slot=(d.get('time_slot') or '').strip()[:64] or None,
             )
         except PermissionError as e:
             return jsonify({'error': str(e)}), 403
@@ -443,6 +446,27 @@ def block_user():
     except (ValueError, PermissionError) as e:
         return jsonify({'error': str(e)}), 400
     return jsonify({'message': 'User blocked.'}), 200
+
+
+@matching_bp.route('/block/temporary', methods=['POST'])
+@login_required
+def block_user_temporary():
+    """Create a temporary do-not-match entry with an expiry."""
+    d = request.get_json(force=True) or {}
+    blocked_id = d.get('user_id')
+    if not blocked_id:
+        return jsonify({'error': 'user_id is required.'}), 400
+    try:
+        with db() as conn:
+            matching_service.block_user_temporary(
+                conn, g.user_id, int(blocked_id),
+                reason=d.get('reason'),
+                duration_hours=d.get('duration_hours'),
+                expires_at=d.get('expires_at'),
+            )
+    except (ValueError, PermissionError) as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'message': 'Temporary block created.'}), 200
 
 
 @matching_bp.route('/block/<int:blocked_id>', methods=['DELETE'])

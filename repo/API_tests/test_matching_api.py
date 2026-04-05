@@ -3,6 +3,7 @@ API tests for /api/matching: profiles, search, sessions, queue governance,
 HTMX partial endpoints, blacklist.
 """
 
+import io
 import pytest
 from API_tests.conftest import register_and_login
 
@@ -11,6 +12,22 @@ def _credit_user(client, admin_headers, uid, amount=500.0):
     client.post('/api/ledger/credit', headers=admin_headers,
                 json={'user_id': uid, 'amount': amount,
                       'description': 'test credit'})
+
+
+def _verify_user(client, admin_headers, h):
+    """Submit a minimal verification document and have admin approve it."""
+    pdf = b'%PDF-1.4 test'
+    r = client.post('/api/verification/submit',
+                    headers={k: v for k, v in h.items()
+                             if k.lower() != 'content-type'},
+                    data={'document_type': 'passport',
+                          'document': (io.BytesIO(pdf), 'doc.pdf', 'application/pdf')},
+                    content_type='multipart/form-data')
+    if r.status_code != 201:
+        return  # already submitted or other error
+    vid = r.get_json()['verification_id']
+    client.put(f'/api/verification/{vid}/review', headers=admin_headers,
+               json={'decision': 'verified', 'notes': 'auto-approved in test'})
 
 
 class TestMatchingProfile:
@@ -112,6 +129,7 @@ class TestHTMXPartials:
     def test_queue_status_partial_waiting(self, client, admin_headers):
         h, uid = register_and_login(client, 'htmx_q', 'htmx_q@test.com')
         _credit_user(client, admin_headers, uid)
+        _verify_user(client, admin_headers, h)
         # Join queue to create a waiting entry
         jr = client.post('/api/matching/queue', headers=h,
                          json={'skill': 'htmx-test', 'priority': 0})
@@ -131,6 +149,8 @@ class TestHTMXPartials:
         h2, uid2 = register_and_login(client, 'htmx_m2', 'htmx_m2@test.com')
         _credit_user(client, admin_headers, uid1)
         _credit_user(client, admin_headers, uid2)
+        _verify_user(client, admin_headers, h1)
+        _verify_user(client, admin_headers, h2)
 
         jr1 = client.post('/api/matching/queue', headers=h1,
                           json={'skill': 'htmx-match'})
@@ -167,6 +187,7 @@ class TestQueueGovernance:
     def test_join_queue_basic(self, client, admin_headers):
         h, uid = register_and_login(client, 'qgov_a', 'qgov_a@test.com')
         _credit_user(client, admin_headers, uid)
+        _verify_user(client, admin_headers, h)
         resp = client.post('/api/matching/queue', headers=h,
                            json={'skill': 'governance-test'})
         assert resp.status_code == 201
@@ -175,6 +196,7 @@ class TestQueueGovernance:
     def test_cancel_queue_entry(self, client, admin_headers):
         h, uid = register_and_login(client, 'qcancel', 'qcancel@test.com')
         _credit_user(client, admin_headers, uid)
+        _verify_user(client, admin_headers, h)
         jr = client.post('/api/matching/queue', headers=h,
                          json={'skill': 'cancel-test'})
         eid = jr.get_json()['entry_id']
@@ -187,6 +209,7 @@ class TestQueueGovernance:
     def test_cancel_interval_enforced(self, client, admin_headers):
         h, uid = register_and_login(client, 'qcooldown', 'qcooldown@test.com')
         _credit_user(client, admin_headers, uid)
+        _verify_user(client, admin_headers, h)
         # First join and cancel
         jr = client.post('/api/matching/queue', headers=h,
                          json={'skill': 'cooldown-test'})
@@ -202,6 +225,7 @@ class TestQueueGovernance:
         h1, uid1 = register_and_login(client, 'qacc1', 'qacc1@test.com')
         h2, uid2 = register_and_login(client, 'qacc2', 'qacc2@test.com')
         _credit_user(client, admin_headers, uid1)
+        _verify_user(client, admin_headers, h1)
         jr = client.post('/api/matching/queue', headers=h1,
                          json={'skill': 'access-test'})
         eid = jr.get_json()['entry_id']
@@ -213,6 +237,7 @@ class TestQueueGovernance:
         h1, uid1 = register_and_login(client, 'qother1', 'qother1@test.com')
         h2, uid2 = register_and_login(client, 'qother2', 'qother2@test.com')
         _credit_user(client, admin_headers, uid1)
+        _verify_user(client, admin_headers, h1)
         jr = client.post('/api/matching/queue', headers=h1,
                          json={'skill': 'other-test'})
         eid = jr.get_json()['entry_id']
@@ -229,6 +254,7 @@ class TestQueueGovernance:
     def test_skill_required(self, client, admin_headers):
         h, uid = register_and_login(client, 'qnoskill', 'qnoskill@test.com')
         _credit_user(client, admin_headers, uid)
+        _verify_user(client, admin_headers, h)
         resp = client.post('/api/matching/queue', headers=h,
                            json={'skill': ''})
         assert resp.status_code == 400
@@ -241,6 +267,8 @@ class TestSessionLifecycle:
         h2, uid2 = user2_headers_with_id
         _credit_user(client, admin_headers, uid1)
         _credit_user(client, admin_headers, uid2)
+        _verify_user(client, admin_headers, h1)
+        _verify_user(client, admin_headers, h2)
         resp = client.post('/api/matching/sessions', headers=h1,
                            json={'participant_id': uid2,
                                  'description': 'Test session',
@@ -254,6 +282,8 @@ class TestSessionLifecycle:
         h2, uid2 = user2_headers_with_id
         _credit_user(client, admin_headers, uid1)
         _credit_user(client, admin_headers, uid2)
+        _verify_user(client, admin_headers, h1)
+        _verify_user(client, admin_headers, h2)
         cr = client.post('/api/matching/sessions', headers=h1,
                          json={'participant_id': uid2,
                                'description': 'Lifecycle', 'credit_amount': 0})
@@ -275,6 +305,8 @@ class TestSessionLifecycle:
         h2, uid2 = user2_headers_with_id
         _credit_user(client, admin_headers, uid1)
         _credit_user(client, admin_headers, uid2)
+        _verify_user(client, admin_headers, h1)
+        _verify_user(client, admin_headers, h2)
         cr = client.post('/api/matching/sessions', headers=h1,
                          json={'participant_id': uid2,
                                'description': 'Bad trans', 'credit_amount': 0})
@@ -291,6 +323,8 @@ class TestSessionLifecycle:
         h2, uid2 = user2_headers_with_id
         _credit_user(client, admin_headers, uid1)
         _credit_user(client, admin_headers, uid2)
+        _verify_user(client, admin_headers, h1)
+        _verify_user(client, admin_headers, h2)
         cr = client.post('/api/matching/sessions', headers=h1,
                          json={'participant_id': uid2,
                                'description': 'RBAC', 'credit_amount': 0})

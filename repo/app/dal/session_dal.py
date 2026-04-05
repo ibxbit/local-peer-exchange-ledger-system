@@ -7,16 +7,20 @@ from app.utils import utcnow
 def create(conn, initiator_id: int, participant_id: int,
            description: str, duration_minutes: int,
            credit_amount: float, scheduled_at: str,
-           idempotency_key: str = None) -> int:
+           idempotency_key: str = None,
+           building: str = None, room: str = None,
+           time_slot: str = None) -> int:
     now = utcnow()
     cur = conn.execute(
         'INSERT INTO sessions '
         '(initiator_id, participant_id, status, description, '
         'duration_minutes, credit_amount, scheduled_at, '
+        'building, room, time_slot, '
         'created_at, updated_at, idempotency_key) '
-        'VALUES (?, ?, "pending", ?, ?, ?, ?, ?, ?, ?)',
+        'VALUES (?, ?, "pending", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (initiator_id, participant_id, description,
          duration_minutes, credit_amount, scheduled_at,
+         building, room, time_slot,
          now, now, idempotency_key)
     )
     return cur.lastrowid
@@ -24,7 +28,11 @@ def create(conn, initiator_id: int, participant_id: int,
 
 def get_by_id(conn, session_id: int) -> dict | None:
     return row_to_dict(conn.execute(
-        'SELECT s.*, '
+        'SELECT s.id, s.initiator_id, s.participant_id, s.status, '
+        's.description, s.duration_minutes, s.credit_amount, s.scheduled_at, '
+        's.building, s.room, s.time_slot, '
+        's.started_at, s.completed_at, s.cancelled_at, s.cancel_reason, '
+        's.created_at, s.updated_at, s.idempotency_key, '
         'u1.username as initiator_name, u2.username as participant_name '
         'FROM sessions s '
         'JOIN users u1 ON s.initiator_id = u1.id '
@@ -91,15 +99,18 @@ def list_for_user(conn, user_id: int, role: str = 'all',
 
 def list_all(conn, status: str = None,
              scheduled_after: str = None, scheduled_before: str = None,
+             buildings: list = None, rooms: list = None,
+             time_slots: list = None,
              limit: int = 20, offset: int = 0) -> tuple[list, int]:
     """
     List all sessions with optional filters.
-    scheduled_after / scheduled_before are ISO-8601 date strings used
-    to implement time-slot scoping for restricted admin permissions.
+    scheduled_after/before, buildings, rooms, time_slots implement
+    fine-grained resource scoping for restricted admin permissions.
     """
     query = (
         'SELECT s.id, s.status, s.credit_amount, s.duration_minutes, '
         's.scheduled_at, s.created_at, s.completed_at, s.cancel_reason, '
+        's.building, s.room, s.time_slot, '
         'u1.username as initiator, u2.username as participant '
         'FROM sessions s '
         'JOIN users u1 ON s.initiator_id = u1.id '
@@ -116,6 +127,18 @@ def list_all(conn, status: str = None,
     if scheduled_before:
         query += ' AND s.scheduled_at <= ?'
         params.append(scheduled_before)
+    if buildings:
+        placeholders = ','.join('?' * len(buildings))
+        query += f' AND s.building IN ({placeholders})'
+        params.extend(buildings)
+    if rooms:
+        placeholders = ','.join('?' * len(rooms))
+        query += f' AND s.room IN ({placeholders})'
+        params.extend(rooms)
+    if time_slots:
+        placeholders = ','.join('?' * len(time_slots))
+        query += f' AND s.time_slot IN ({placeholders})'
+        params.extend(time_slots)
     total = conn.execute(f'SELECT COUNT(*) FROM ({query})', params).fetchone()[0]
     query += ' ORDER BY s.id DESC LIMIT ? OFFSET ?'
     rows = rows_to_list(conn.execute(query, params + [limit, offset]).fetchall())
