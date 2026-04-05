@@ -18,6 +18,7 @@ os.close(_db_fd)
 import config as _cfg
 _cfg.Config.DATABASE_PATH = _DB_PATH   # isolate from API_tests DB
 
+import io
 import pytest
 
 
@@ -34,6 +35,14 @@ def app():
 @pytest.fixture(scope='session')
 def client(app):
     return app.test_client()
+
+
+# Clear the pex_session cookie after every test so unauthenticated tests
+# are not accidentally authenticated by a previous test's login cookie.
+@pytest.fixture(autouse=True)
+def _clear_session_cookie(client):
+    yield
+    client.delete_cookie('pex_session', path='/', domain='localhost')
 
 
 @pytest.fixture(scope='session')
@@ -57,10 +66,27 @@ def _register_and_login(client, username, email, password='FETest@123456!'):
     return {'Authorization': f'Bearer {token}'}, uid
 
 
+def _verify_user(client, admin_headers, h):
+    """Submit a minimal verification doc and have admin approve it (idempotent)."""
+    pdf = b'%PDF-1.4 test'
+    r = client.post('/api/verification/submit',
+                    headers={k: v for k, v in h.items()
+                             if k.lower() != 'content-type'},
+                    data={'document_type': 'passport',
+                          'document': (io.BytesIO(pdf), 'doc.pdf', 'application/pdf')},
+                    content_type='multipart/form-data')
+    if r.status_code != 201:
+        return  # already submitted or already verified
+    vid = r.get_json()['verification_id']
+    client.put(f'/api/verification/{vid}/review', headers=admin_headers,
+               json={'decision': 'verified', 'notes': 'auto-approved in test'})
+
+
 @pytest.fixture(scope='session')
 def user_with_credits(client, admin_headers):
     h, uid = _register_and_login(client, 'fe_user', 'fe_user@test.com')
     client.post('/api/ledger/credit', headers=admin_headers,
                 json={'user_id': uid, 'amount': 500.0,
                       'description': 'FE test credits'})
+    _verify_user(client, admin_headers, h)
     return h, uid

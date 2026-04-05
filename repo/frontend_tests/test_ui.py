@@ -180,11 +180,12 @@ class TestQueueStatusPartial:
         assert 'every 10s' in body
 
     def test_queue_status_partial_shows_skill(self, client, admin_headers):
-        from frontend_tests.conftest import _register_and_login
+        from frontend_tests.conftest import _register_and_login, _verify_user
         h, uid = _register_and_login(client, 'qs_skill', 'qs_skill@test.com')
         client.post('/api/ledger/credit', headers=admin_headers,
                     json={'user_id': uid, 'amount': 500.0,
                           'description': 'test'})
+        _verify_user(client, admin_headers, h)
         jr = client.post('/api/matching/queue', headers=h,
                          json={'skill': 'uniqueskill42'})
         eid = jr.get_json()['entry_id']
@@ -195,11 +196,12 @@ class TestQueueStatusPartial:
 
     def test_queue_status_partial_after_cancel_no_poll(self, client, admin_headers):
         """After cancellation, the fragment must NOT include hx-trigger polling."""
-        from frontend_tests.conftest import _register_and_login
+        from frontend_tests.conftest import _register_and_login, _verify_user
         h, uid = _register_and_login(client, 'qs_cancel', 'qs_cancel@test.com')
         client.post('/api/ledger/credit', headers=admin_headers,
                     json={'user_id': uid, 'amount': 500.0,
                           'description': 'test'})
+        _verify_user(client, admin_headers, h)
         jr = client.post('/api/matching/queue', headers=h,
                          json={'skill': 'cancelskill'})
         eid = jr.get_json()['entry_id']
@@ -211,12 +213,13 @@ class TestQueueStatusPartial:
         assert 'every 10s' not in body
 
     def test_queue_status_partial_wrong_user(self, client, admin_headers):
-        from frontend_tests.conftest import _register_and_login
+        from frontend_tests.conftest import _register_and_login, _verify_user
         h1, uid1 = _register_and_login(client, 'qs_own', 'qs_own@test.com')
         h2, uid2 = _register_and_login(client, 'qs_other', 'qs_other@test.com')
         client.post('/api/ledger/credit', headers=admin_headers,
                     json={'user_id': uid1, 'amount': 500.0,
                           'description': 'test'})
+        _verify_user(client, admin_headers, h1)
         jr = client.post('/api/matching/queue', headers=h1,
                          json={'skill': 'private-skill'})
         eid = jr.get_json()['entry_id']
@@ -240,7 +243,7 @@ class TestSessionsPartial:
         assert 'No sessions' in body or '<tr>' in body
 
     def test_sessions_partial_shows_session(self, client, admin_headers):
-        from frontend_tests.conftest import _register_and_login
+        from frontend_tests.conftest import _register_and_login, _verify_user
         h1, uid1 = _register_and_login(client, 'sess_a', 'sess_a@test.com')
         h2, uid2 = _register_and_login(client, 'sess_b', 'sess_b@test.com')
         client.post('/api/ledger/credit', headers=admin_headers,
@@ -249,6 +252,8 @@ class TestSessionsPartial:
         client.post('/api/ledger/credit', headers=admin_headers,
                     json={'user_id': uid2, 'amount': 500.0,
                           'description': 'test'})
+        _verify_user(client, admin_headers, h1)
+        _verify_user(client, admin_headers, h2)
         client.post('/api/matching/sessions', headers=h1,
                     json={'participant_id': uid2, 'description': 'HTMX session',
                           'credit_amount': 0})
