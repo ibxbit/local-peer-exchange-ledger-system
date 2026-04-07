@@ -65,16 +65,21 @@ class TestRegister:
 
 
 class TestLogin:
-    def test_login_success(self, client, admin_headers):
+    def test_login_success(self, client):
+        client.post('/api/auth/register', json={
+            'username': 'login_success_user',
+            'email': 'login_success@test.com',
+            'password': 'Login@Success123!'
+        })
         resp = client.post('/api/auth/login', json={
-            'username': 'admin',
-            'password': 'Admin@123456!'
+            'username': 'login_success_user',
+            'password': 'Login@Success123!'
         })
         assert resp.status_code == 200
         data = resp.get_json()
         assert 'token' in data
         assert 'user' in data
-        assert data['user']['role'] == 'admin'
+        assert data['user']['role'] == 'user'
 
     def test_login_wrong_password(self, client):
         client.post('/api/auth/register', json={

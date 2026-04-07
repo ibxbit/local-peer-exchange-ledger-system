@@ -49,16 +49,19 @@ def login():
         return jsonify({'error': str(e)}), 401
 
     resp = make_response(jsonify(result), 200)
+    host = (request.host or '').split(':', 1)[0].lower()
+    is_local_http = host in ('127.0.0.1', 'localhost')
+    secure_cookie = Config.SESSION_COOKIE_SECURE and not is_local_http
     # Set the JWT in an httpOnly cookie so JS cannot read it (XSS protection).
     # SameSite=Strict prevents CSRF for same-origin requests.
-    # secure=False here (HTTP dev); set to True when deploying over HTTPS.
+    # secure=True outside localhost by default; localhost HTTP stays usable.
     resp.set_cookie(
         'pex_session',
         result['token'],
         httponly=True,
         samesite='Strict',
         max_age=int(Config.JWT_EXPIRY_HOURS * 3600),
-        secure=False,
+        secure=secure_cookie,
         path='/',
     )
     return resp
@@ -84,6 +87,7 @@ def me():
         'username':       user['username'],
         'email':          mask_email(user['email']),
         'role':           user['role'],
+        'must_change_password': bool(user.get('must_change_password', 0)),
         'is_active':      bool(user['is_active']),
         'credit_balance': user['credit_balance'],
         'created_at':     user['created_at'],

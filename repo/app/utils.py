@@ -212,6 +212,26 @@ def login_required(f):
         g.user_id = claims['sub']
         g.username = claims['username']
         g.role = claims['role']
+
+        if Config.FORCE_PASSWORD_ROTATION:
+            from app.dal import user_dal
+            # Resolve against DB to enforce first-login password rotation.
+            from app.models import db
+            with db() as conn:
+                user = user_dal.get_by_id(conn, g.user_id)
+            must_change = bool(user and user.get('must_change_password'))
+            if must_change:
+                allowed = (
+                    '/api/auth/change-password',
+                    '/api/auth/me',
+                    '/api/auth/logout',
+                )
+                if request.path not in allowed:
+                    return jsonify({
+                        'error': 'Password change required before continuing.',
+                        'code': 'password_change_required',
+                    }), 403
+
         return f(*args, **kwargs)
     return decorated
 

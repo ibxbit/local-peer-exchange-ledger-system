@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS users (
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
     lockout_until         TEXT,                       -- ISO-8601 or NULL
     muted_until           TEXT,                       -- ISO-8601 or NULL (temp mute)
+    must_change_password  INTEGER NOT NULL DEFAULT 0
+                              CHECK(must_change_password IN (0, 1)),
     created_at            TEXT    NOT NULL,
     updated_at            TEXT    NOT NULL
 );
@@ -38,6 +40,27 @@ CREATE INDEX IF NOT EXISTS idx_users_username  ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role      ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+
+-- =========================================================
+-- 1b. SCHEDULE INVENTORY (building/classroom/time-slot)
+-- Managed by admins; used for explicit schedule resource governance.
+-- =========================================================
+CREATE TABLE IF NOT EXISTS schedule_resources (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    building   TEXT    NOT NULL,
+    room       TEXT    NOT NULL,
+    time_slot  TEXT    NOT NULL,
+    is_active  INTEGER NOT NULL DEFAULT 1
+                       CHECK(is_active IN (0, 1)),
+    created_at TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL,
+    UNIQUE(building, room, time_slot)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sr_active   ON schedule_resources(is_active);
+CREATE INDEX IF NOT EXISTS idx_sr_building ON schedule_resources(building);
+CREATE INDEX IF NOT EXISTS idx_sr_room     ON schedule_resources(room);
+CREATE INDEX IF NOT EXISTS idx_sr_slot     ON schedule_resources(time_slot);
 
 -- =========================================================
 -- 2. IDENTITY VERIFICATION
@@ -458,6 +481,8 @@ def _migrate(conn):
     """Apply additive column migrations that cannot be in CREATE TABLE IF NOT EXISTS."""
     migrations = [
         ("users", "muted_until",   "ALTER TABLE users ADD COLUMN muted_until TEXT"),
+        ("users", "must_change_password",
+         "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"),
         ("sessions", "cancelled_at",  "ALTER TABLE sessions ADD COLUMN cancelled_at TEXT"),
         ("sessions", "cancel_reason", "ALTER TABLE sessions ADD COLUMN cancel_reason TEXT"),
         ("identity_verifications", "document_fingerprint",

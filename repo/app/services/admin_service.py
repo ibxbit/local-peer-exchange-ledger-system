@@ -13,7 +13,7 @@ require_permission(conn, admin_id, resource, write=False):
 """
 
 import json
-from app.dal import user_dal, violation_dal, audit_dal, admin_dal
+from app.dal import user_dal, violation_dal, audit_dal, admin_dal, resource_dal
 from app.utils import utcnow
 
 ALLOWED_SEVERITIES = ('low', 'medium', 'high')
@@ -328,3 +328,71 @@ def revoke_permission(conn, granting_admin_id: int, target_admin_id: int,
     audit_dal.write(conn, 'PERMISSION_REVOKED', user_id=granting_admin_id,
                     entity_type='admin_permissions', entity_id=target_admin_id,
                     details={'resource': resource})
+
+
+# ---------------------------------------------------------------------------
+# Schedule inventory
+# ---------------------------------------------------------------------------
+
+def create_schedule_resource(conn, actor_id: int, building: str,
+                             room: str, time_slot: str) -> int:
+    building = (building or '').strip()[:64]
+    room = (room or '').strip()[:64]
+    time_slot = (time_slot or '').strip()[:64]
+    if not building or not room or not time_slot:
+        raise ValueError('building, room, and time_slot are required.')
+    try:
+        rid = resource_dal.create(conn, building, room, time_slot)
+    except Exception as e:
+        msg = str(e).lower()
+        if 'unique' in msg:
+            raise ValueError('Resource already exists.')
+        raise
+
+    audit_dal.write(conn, 'RESOURCE_CREATED', user_id=actor_id,
+                    entity_type='schedule_resource', entity_id=rid,
+                    details={'building': building, 'room': room, 'time_slot': time_slot})
+    return rid
+
+
+def update_schedule_resource(conn, actor_id: int, resource_id: int,
+                             building: str = None, room: str = None,
+                             time_slot: str = None, is_active: bool | None = None) -> None:
+    rec = resource_dal.get_by_id(conn, resource_id)
+    if not rec:
+        raise LookupError('Resource not found.')
+
+    updates = {}
+    if building is not None:
+        updates['building'] = building.strip()[:64]
+    if room is not None:
+        updates['room'] = room.strip()[:64]
+    if time_slot is not None:
+        updates['time_slot'] = time_slot.strip()[:64]
+    if is_active is not None:
+        updates['is_active'] = 1 if is_active else 0
+    if not updates:
+        raise ValueError('No updatable fields provided.')
+    if any(k in updates and not updates[k] for k in ('building', 'room', 'time_slot')):
+        raise ValueError('building, room, and time_slot cannot be blank.')
+
+    try:
+        resource_dal.update(conn, resource_id, **updates)
+    except Exception as e:
+        msg = str(e).lower()
+        if 'unique' in msg:
+            raise ValueError('Resource already exists.')
+        raise
+
+    audit_dal.write(conn, 'RESOURCE_UPDATED', user_id=actor_id,
+                    entity_type='schedule_resource', entity_id=resource_id,
+                    details={'fields': sorted(updates.keys())})
+
+
+def deactivate_schedule_resource(conn, actor_id: int, resource_id: int) -> None:
+    rec = resource_dal.get_by_id(conn, resource_id)
+    if not rec:
+        raise LookupError('Resource not found.')
+    resource_dal.update(conn, resource_id, is_active=0)
+    audit_dal.write(conn, 'RESOURCE_DEACTIVATED', user_id=actor_id,
+                    entity_type='schedule_resource', entity_id=resource_id)

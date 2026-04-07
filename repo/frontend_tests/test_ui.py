@@ -77,13 +77,19 @@ class TestSPAShell:
 
 class TestAuthFlow:
     def test_login_returns_token(self, client):
+        client.post('/api/auth/register', json={
+            'username': 'ui_login_user',
+            'email': 'ui_login_user@test.com',
+            'password': 'UILogin@Test12345!'
+        })
         resp = client.post('/api/auth/login', json={
-            'username': 'admin', 'password': 'Admin@123456!'
+            'username': 'ui_login_user',
+            'password': 'UILogin@Test12345!'
         })
         assert resp.status_code == 200
         data = resp.get_json()
         assert 'token' in data
-        assert data['user']['role'] == 'admin'
+        assert data['user']['role'] == 'user'
 
     def test_me_endpoint_returns_user(self, client, admin_headers):
         resp = client.get('/api/auth/me', headers=admin_headers)
@@ -262,3 +268,45 @@ class TestSessionsPartial:
         body = resp.data.decode()
         assert '<tr>' in body
         assert 'pending' in body.lower() or 'sess_b' in body
+
+
+# ---- End-to-end-ish smoke flow ------------------------------------------
+
+class TestUISmokeJourney:
+    def test_login_queue_status_logout_cycle(self, client, admin_headers):
+        from frontend_tests.conftest import _register_and_login, _verify_user
+
+        h, uid = _register_and_login(client, 'ui_journey', 'ui_journey@test.com')
+        client.post('/api/ledger/credit', headers=admin_headers,
+                    json={'user_id': uid, 'amount': 500.0,
+                          'description': 'journey seed'})
+        _verify_user(client, admin_headers, h)
+
+        # User can access peer search fragment
+        peers = client.get('/api/matching/peers-partial', headers=h)
+        assert peers.status_code == 200
+        assert 'text/html' in peers.content_type
+
+        # User joins queue and sees waiting-state poll UI
+        joined = client.post('/api/matching/queue', headers=h,
+                             json={'skill': 'journey-skill'})
+        assert joined.status_code == 201
+        entry_id = joined.get_json()['entry_id']
+
+        status = client.get(f'/api/matching/queue/{entry_id}/status-partial', headers=h)
+        assert status.status_code == 200
+        status_html = status.data.decode()
+        assert 'every 10s' in status_html
+
+        # Cookie-based auth works for frontend clients and clears on logout.
+        client.post('/api/auth/login', json={
+            'username': 'ui_journey',
+            'password': 'FETest@123456!'
+        })
+        me_before = client.get('/api/auth/me')
+        assert me_before.status_code == 200
+
+        out = client.post('/api/auth/logout')
+        assert out.status_code == 200
+        me_after = client.get('/api/auth/me')
+        assert me_after.status_code == 401

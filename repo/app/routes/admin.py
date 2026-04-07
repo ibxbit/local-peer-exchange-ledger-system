@@ -17,7 +17,9 @@ from app.models import db
 from app.utils import (admin_required, auditor_or_admin_required,
                         check_idempotency, store_idempotency, mask_email)
 from app.services import admin_service, ledger_service
-from app.dal import session_dal, user_dal, violation_dal, admin_dal, rating_dal
+from app.dal import (
+    session_dal, user_dal, violation_dal, admin_dal, rating_dal, resource_dal,
+)
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -172,6 +174,103 @@ def unmute_user(user_id):
 # ---------------------------------------------------------------------------
 # Sessions (with time-slot scope)
 # ---------------------------------------------------------------------------
+
+@admin_bp.route('/resources', methods=['GET'])
+@auditor_or_admin_required
+def list_resources():
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = min(100, int(request.args.get('per_page', 20)))
+
+    with db() as conn:
+        try:
+            admin_service.require_permission(conn, g.user_id, 'sessions')
+        except PermissionError as e:
+            return jsonify({'error': str(e)}), 403
+
+        is_active = request.args.get('is_active')
+        active_filter = None
+        if is_active in ('0', '1'):
+            active_filter = int(is_active)
+
+        rows, total = resource_dal.list_resources(
+            conn,
+            building=request.args.get('building'),
+            room=request.args.get('room'),
+            time_slot=request.args.get('time_slot'),
+            is_active=active_filter,
+            limit=per_page,
+            offset=(page - 1) * per_page,
+        )
+    return jsonify({'resources': rows, 'total': total, 'page': page}), 200
+
+
+@admin_bp.route('/resources', methods=['POST'])
+@admin_required
+def create_resource():
+    if not _is_write_allowed():
+        return jsonify({'error': 'Auditors cannot perform write operations.'}), 403
+
+    d = request.get_json(force=True) or {}
+    with db() as conn:
+        try:
+            admin_service.require_permission(conn, g.user_id, 'sessions', write=True)
+            rid = admin_service.create_schedule_resource(
+                conn,
+                g.user_id,
+                building=d.get('building'),
+                room=d.get('room'),
+                time_slot=d.get('time_slot'),
+            )
+        except PermissionError as e:
+            return jsonify({'error': str(e)}), 403
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+    return jsonify({'message': 'Resource created.', 'resource_id': rid}), 201
+
+
+@admin_bp.route('/resources/<int:resource_id>', methods=['PUT'])
+@admin_required
+def update_resource(resource_id):
+    if not _is_write_allowed():
+        return jsonify({'error': 'Auditors cannot perform write operations.'}), 403
+
+    d = request.get_json(force=True) or {}
+    with db() as conn:
+        try:
+            admin_service.require_permission(conn, g.user_id, 'sessions', write=True)
+            admin_service.update_schedule_resource(
+                conn,
+                g.user_id,
+                resource_id,
+                building=d.get('building'),
+                room=d.get('room'),
+                time_slot=d.get('time_slot'),
+                is_active=d.get('is_active'),
+            )
+        except PermissionError as e:
+            return jsonify({'error': str(e)}), 403
+        except LookupError as e:
+            return jsonify({'error': str(e)}), 404
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+    return jsonify({'message': 'Resource updated.'}), 200
+
+
+@admin_bp.route('/resources/<int:resource_id>', methods=['DELETE'])
+@admin_required
+def deactivate_resource(resource_id):
+    if not _is_write_allowed():
+        return jsonify({'error': 'Auditors cannot perform write operations.'}), 403
+
+    with db() as conn:
+        try:
+            admin_service.require_permission(conn, g.user_id, 'sessions', write=True)
+            admin_service.deactivate_schedule_resource(conn, g.user_id, resource_id)
+        except PermissionError as e:
+            return jsonify({'error': str(e)}), 403
+        except LookupError as e:
+            return jsonify({'error': str(e)}), 404
+    return jsonify({'message': 'Resource deactivated.'}), 200
 
 @admin_bp.route('/sessions', methods=['GET'])
 @auditor_or_admin_required

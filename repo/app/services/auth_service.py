@@ -104,6 +104,7 @@ def login(conn, username: str, password: str) -> dict:
             'id':       user['id'],
             'username': user['username'],
             'role':     user['role'],
+            'must_change_password': bool(user.get('must_change_password', 0)),
         },
     }
 
@@ -117,5 +118,7 @@ def change_password(conn, user_id: int,
     if not ok:
         raise ValueError(msg)
     user_dal.update_fields(conn, user_id, password_hash=hash_password(new_pw))
+    if Config.FORCE_PASSWORD_ROTATION:
+        user_dal.update_fields(conn, user_id, must_change_password=0)
     audit_dal.write(conn, 'PASSWORD_CHANGED', user_id=user_id,
                     entity_type='user', entity_id=user_id)

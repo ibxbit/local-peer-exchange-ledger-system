@@ -60,16 +60,18 @@ def _seed_admin():
     from app.models import db
     from app.utils import hash_password, utcnow
     with db() as conn:
-        if conn.execute(
+        existing = conn.execute(
             'SELECT id FROM users WHERE username = ?',
             (Config.ADMIN_SEED_USERNAME,)
-        ).fetchone():
+        ).fetchone()
+        if existing:
             return
         now = utcnow()
+        must_change = 1 if Config.FORCE_PASSWORD_ROTATION else 0
         conn.execute(
             'INSERT INTO users (username, email, password_hash, role, '
-            'is_active, credit_balance, created_at, updated_at) '
-            'VALUES (?, ?, ?, ?, 1, 1000.0, ?, ?)',
+            'is_active, credit_balance, must_change_password, created_at, updated_at) '
+            'VALUES (?, ?, ?, ?, 1, 1000.0, ?, ?, ?)',
             (Config.ADMIN_SEED_USERNAME, Config.ADMIN_SEED_EMAIL,
-             hash_password(Config.ADMIN_SEED_PASSWORD), 'admin', now, now)
+             hash_password(Config.ADMIN_SEED_PASSWORD), 'admin', must_change, now, now)
         )

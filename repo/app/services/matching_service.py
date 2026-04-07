@@ -15,7 +15,7 @@ import json
 from datetime import datetime, timezone, timedelta
 
 from app.services.guards import guard_can_act, guard_is_active, guard_is_verified
-from app.dal import matching_dal, session_dal, audit_dal, user_dal
+from app.dal import matching_dal, session_dal, audit_dal, user_dal, resource_dal
 from app.utils import utcnow
 
 # ---- Governance constants ------------------------------------------------
@@ -130,6 +130,26 @@ def request_session(conn, initiator_id: int, participant_id: int,
 
     if matching_dal.is_blocked(conn, initiator_id, participant_id):
         raise ValueError('Cannot create a session with a blocked user.')
+
+    if building or room or time_slot:
+        any_active, _ = resource_dal.list_resources(
+            conn, is_active=1, limit=1, offset=0
+        )
+        if any_active:
+            resources, _ = resource_dal.list_resources(
+                conn,
+                building=building,
+                room=room,
+                time_slot=time_slot,
+                is_active=1,
+                limit=1,
+                offset=0,
+            )
+            if not resources:
+                raise ValueError(
+                    'Selected schedule resource is not in the active inventory. '
+                    'Please choose a valid building/room/time-slot.'
+                )
 
     session_id = session_dal.create(
         conn, initiator_id, participant_id,

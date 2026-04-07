@@ -71,6 +71,21 @@ class TestLoginSetsCookie:
         data = resp.get_json()
         assert 'token' in data
 
+    def test_cookie_secure_enabled_for_non_local_host(self, client, fresh_client):
+        """Secure flag should be set when request host is not localhost/127.0.0.1."""
+        register_and_login(client, 'ck_secure1', 'ck_secure1@test.com')
+        resp = fresh_client.post(
+            '/api/auth/login',
+            json={'username': 'ck_secure1', 'password': 'TestUser@123456!'},
+            headers={'Host': 'example.internal:443'},
+        )
+        assert resp.status_code == 200
+        cookie_headers = [
+            v for n, v in resp.headers
+            if n.lower() == 'set-cookie' and 'pex_session=' in v
+        ]
+        assert any('secure' in h.lower() for h in cookie_headers)
+
 
 # ---- Cookie-based auth works -----------------------------------------------
 

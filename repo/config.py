@@ -2,6 +2,11 @@ import os
 import json
 import secrets
 
+
+def _generate_bootstrap_password() -> str:
+    """Generate a strong local bootstrap password (>= 12 chars)."""
+    return f"Adm!n{secrets.token_urlsafe(12)}A1"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INSTANCE_DIR = os.path.join(BASE_DIR, 'instance')
 CONFIG_FILE = os.path.join(INSTANCE_DIR, 'config.json')
@@ -17,6 +22,9 @@ def _load_or_create_config() -> dict:
         if 'PAYMENT_SIGNING_KEY' not in cfg:
             cfg['PAYMENT_SIGNING_KEY'] = secrets.token_hex(32)
             changed = True
+        if 'ADMIN_BOOTSTRAP_PASSWORD' not in cfg:
+            cfg['ADMIN_BOOTSTRAP_PASSWORD'] = _generate_bootstrap_password()
+            changed = True
         if changed:
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(cfg, f, indent=2)
@@ -25,6 +33,7 @@ def _load_or_create_config() -> dict:
         'SECRET_KEY': secrets.token_hex(32),
         'ENCRYPTION_KEY': secrets.token_hex(32),    # 64 hex chars = 32 bytes
         'PAYMENT_SIGNING_KEY': secrets.token_hex(32),
+        'ADMIN_BOOTSTRAP_PASSWORD': _generate_bootstrap_password(),
     }
     with open(CONFIG_FILE, 'w') as f:
         json.dump(cfg, f, indent=2)
@@ -50,4 +59,15 @@ class Config:
     # Admin seed (changed after first login)
     ADMIN_SEED_USERNAME: str = 'admin'
     ADMIN_SEED_EMAIL: str = 'admin@local.lan'
-    ADMIN_SEED_PASSWORD: str = 'Admin@123456!'
+    ADMIN_SEED_PASSWORD: str = _cfg['ADMIN_BOOTSTRAP_PASSWORD']
+
+    # Force seeded admin password rotation before privileged actions.
+    # Set PEX_FORCE_PASSWORD_ROTATION=0 only for controlled test scenarios.
+    FORCE_PASSWORD_ROTATION: bool = os.environ.get(
+        'PEX_FORCE_PASSWORD_ROTATION', '1'
+    ).strip().lower() in ('1', 'true', 'yes', 'on')
+
+    # Secure cookie defaults to True outside localhost HTTP development.
+    SESSION_COOKIE_SECURE: bool = os.environ.get(
+        'PEX_SESSION_COOKIE_SECURE', '1'
+    ).strip().lower() in ('1', 'true', 'yes', 'on')

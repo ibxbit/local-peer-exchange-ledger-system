@@ -24,14 +24,14 @@ All REST endpoints are prefixed with `/api/`. The frontend SPA is served at `/`.
 
 ---
 
-## Default Admin Credentials
+## Bootstrap Admin Credentials
 
 | Field | Value |
 |-------|-------|
 | Username | `admin` |
-| Password | `Admin@123456!` |
+| Password source | `instance/config.json` -> `ADMIN_BOOTSTRAP_PASSWORD` |
 
-**Change the admin password immediately after first login.**
+On first login, the admin must change password before privileged actions.
 
 ---
 
@@ -58,6 +58,10 @@ All REST endpoints are prefixed with `/api/`. The frontend SPA is served at `/`.
 | `POST /api/admin/violations` | Report a violation |
 | `PUT  /api/admin/users/<id>/ban` | Ban a user |
 | `PUT  /api/admin/users/<id>/unban` | Unban a user |
+| `GET  /api/admin/resources` | List schedule inventory resources |
+| `POST /api/admin/resources` | Create schedule inventory resource |
+| `PUT  /api/admin/resources/<id>` | Update schedule inventory resource |
+| `DELETE /api/admin/resources/<id>` | Deactivate schedule inventory resource |
 | `GET  /api/matching/search` | Search peers by skill / tag / time slot |
 | `POST /api/matching/profile` | Create / update matching profile |
 | `POST /api/matching/queue` | Join the auto-match queue |
@@ -82,12 +86,33 @@ Wait for the line: `Running on http://0.0.0.0:8000`
 ### 2. Verify the API is reachable
 
 ```bash
+BOOTSTRAP_PW=$(python - <<'PY'
+import json
+print(json.load(open('instance/config.json'))['ADMIN_BOOTSTRAP_PASSWORD'])
+PY
+)
+
 curl -s http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin@123456!"}' | python -m json.tool
+  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" | python -m json.tool
 ```
 
 Expected: `{"token": "...", "user": {"role": "admin", ...}}`
+
+If `user.must_change_password` is `true`, rotate immediately:
+
+```bash
+TOKEN=$(curl -s http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
+  | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+curl -s http://localhost:8000/api/auth/change-password \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"current_password\":\"$BOOTSTRAP_PW\",\"new_password\":\"Admin@Rotate123456!\"}" \
+  | python -m json.tool
+```
 
 ### 3. Register a user
 
@@ -106,7 +131,7 @@ Expected: `{"message": "Registration successful.", "user_id": 2}`
 # Get admin token first
 TOKEN=$(curl -s http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin@123456!"}' \
+  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
   | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
 curl -s http://localhost:8000/api/ledger/credit \
@@ -192,9 +217,9 @@ PORT=8000 HOST=0.0.0.0 python run.py
 ### First-time setup
 
 On startup the app:
-1. Creates `instance/config.json` with auto-generated secrets (SECRET_KEY, ENCRYPTION_KEY, PAYMENT_SIGNING_KEY).
+1. Creates `instance/config.json` with auto-generated secrets (SECRET_KEY, ENCRYPTION_KEY, PAYMENT_SIGNING_KEY, ADMIN_BOOTSTRAP_PASSWORD).
 2. Initialises `instance/app.db` (SQLite).
-3. Seeds the default admin account (`admin` / `Admin@123456!`).
+3. Seeds the default admin account (`admin` / value of `ADMIN_BOOTSTRAP_PASSWORD`).
 
 No SQL imports or manual configuration required.
 
@@ -266,7 +291,9 @@ repo/
 ## Security Notes
 
 - All passwords hashed with PBKDF2-SHA256 (600,000 iterations)
+- Seeded admin uses generated local bootstrap password and forced first-login rotation
 - JWTs signed with HS256, expire after 24 hours
+- Session cookie uses httpOnly + SameSite=Strict and `Secure` outside localhost HTTP
 - Identity documents encrypted with AES-256-GCM
 - Offline payment records signed with HMAC-SHA256
 - Audit log entries form a tamper-evident SHA-256 hash chain

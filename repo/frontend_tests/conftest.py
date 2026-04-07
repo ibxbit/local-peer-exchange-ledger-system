@@ -47,11 +47,40 @@ def _clear_session_cookie(client):
 
 @pytest.fixture(scope='session')
 def admin_headers(client):
-    resp = client.post('/api/auth/login', json={
-        'username': 'admin', 'password': 'Admin@123456!'
-    })
-    assert resp.status_code == 200, f'Admin login failed: {resp.data}'
-    token = resp.get_json()['token']
+    bootstrap_pw = _cfg.Config.ADMIN_SEED_PASSWORD
+    rotated_pw = 'Admin@Rotated123456!'
+
+    resp = None
+    used_pw = None
+    for candidate in (rotated_pw, bootstrap_pw):
+        probe = client.post('/api/auth/login', json={
+            'username': 'admin', 'password': candidate
+        })
+        if probe.status_code == 200:
+            resp = probe
+            used_pw = candidate
+            break
+    assert resp is not None, 'Admin login failed with known credentials.'
+
+    data = resp.get_json()
+    token = data['token']
+
+    if data.get('user', {}).get('must_change_password'):
+        cp = client.post('/api/auth/change-password', headers={
+            'Authorization': f'Bearer {token}'
+        }, json={
+            'current_password': used_pw,
+            'new_password': rotated_pw,
+        })
+        assert cp.status_code == 200, f'Admin rotation failed: {cp.data}'
+
+        resp2 = client.post('/api/auth/login', json={
+            'username': 'admin',
+            'password': rotated_pw,
+        })
+        assert resp2.status_code == 200, f'Admin re-login failed: {resp2.data}'
+        token = resp2.get_json()['token']
+
     return {'Authorization': f'Bearer {token}'}
 
 
