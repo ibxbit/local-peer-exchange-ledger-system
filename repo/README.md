@@ -244,6 +244,26 @@ The script installs dependencies if needed, then runs:
 - **API tests** in `API_tests/` — every REST endpoint, RBAC enforcement, error responses, matching governance API boundaries
 - **Frontend tests** in `frontend_tests/` — SPA shell validation, HTMX partial endpoint responses, core UI flow states
 
+### Browser E2E smoke test (Playwright)
+
+A dedicated browser E2E suite is available in `e2e_tests/` to cover browser-only behavior.
+
+```bash
+# Install JS test dependencies
+npm install
+
+# Install Chromium used by Playwright
+npx playwright install chromium
+
+# Run browser smoke flow: login -> queue -> status poll -> logout
+npm run test:e2e
+```
+
+Notes:
+- By default Playwright starts the Flask server automatically using `run.py`.
+- To target an already running server, set `PEX_E2E_USE_EXTERNAL_SERVER=1` and (optionally) `BASE_URL`.
+- If your local admin password was already rotated to a custom value, set `PEX_ADMIN_PASSWORD` before running the E2E test.
+
 Tests are idempotent and use isolated in-memory / temp databases. No manual setup required.
 
 ### Running individual suites
@@ -260,7 +280,23 @@ py -3 -m pytest frontend_tests/ -v
 
 # Matching-specific tests
 py -3 -m pytest unit_tests/test_matching.py API_tests/test_matching_api.py frontend_tests/test_ui.py -v
+
+# Browser E2E only
+npm run test:e2e
 ```
+
+### Scheduler 2:00 AM ops check
+
+To validate the real-clock scheduler behavior in CI/staging after 2:00 AM local time:
+
+```bash
+PEX_BASE_URL=http://127.0.0.1:5000 \
+PEX_ADMIN_USER=admin \
+PEX_ADMIN_PASSWORD='<admin password>' \
+python scripts/check_daily_scheduler_firing.py
+```
+
+The check passes only when the latest saved daily report date equals yesterday.
 
 ---
 
