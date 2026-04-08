@@ -6,11 +6,43 @@ A peer skill-exchange platform with ledger, identity verification, admin moderat
 
 ## Quick Start
 
+### Without Docker (recommended for local dev)
+
+```bash
+# 1. Install Python dependencies
+pip install -r requirements.txt
+
+# 2. Start the server  (auto-creates instance/config.json and instance/app.db)
+#    Linux / macOS:
+python3 run.py
+#    Windows:
+py -3 run.py
+```
+
+The app starts on `http://127.0.0.1:5000` by default.  
+Read the bootstrap password and verify the API is up:
+
+```bash
+# Read the generated admin password (Linux/macOS)
+BOOTSTRAP_PW=$(python3 -c "import json; print(json.load(open('instance/config.json'))['ADMIN_BOOTSTRAP_PASSWORD'])")
+
+# Verify login works
+curl -s http://127.0.0.1:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
+  | python3 -m json.tool
+```
+
+Expected response: `{"token": "...", "user": {"role": "admin", ...}}`
+
+### With Docker
+
 ```bash
 docker compose up
 ```
 
-That's it. No manual configuration or SQL imports required. The application auto-seeds an admin account and initialises the SQLite database on first run.
+The application auto-seeds an admin account and initialises the SQLite database on first run.
+Address: `http://localhost:8000`
 
 ---
 
@@ -50,6 +82,9 @@ On first login, the admin must change password before privileged actions.
 | `POST /api/payments/submit` | Submit offline payment (cash/check/ACH) |
 | `POST /api/payments/<id>/confirm` | Confirm payment and credit account (admin) |
 | `POST /api/payments/<id>/refund` | Refund a confirmed payment (admin) |
+| `GET  /api/ledger/ar-summary` | Accounts Receivable summary (admin/auditor) |
+| `GET  /api/ledger/ap-summary` | Accounts Payable summary (admin/auditor) |
+| `GET  /api/ledger/reconciliation-summary` | Invoice ↔ ledger reconciliation (admin/auditor) |
 | `GET  /api/audit/logs` | Audit log listing (admin/auditor) |
 | `GET  /api/audit/logs/summary` | Event counts by category |
 | `GET  /api/audit/logs/verify` | SHA-256 chain integrity check |
@@ -204,14 +239,21 @@ Expected: JSON object with `kpis.conversion_rate`, `kpis.dispute_rate`, etc.
 pip install -r requirements.txt
 
 # 2. Start the development server (auto-creates instance/config.json on first run)
-python run.py
+#    Linux / macOS:
+python3 run.py
+#    Windows (cmd or PowerShell):
+py -3 run.py
 ```
 
 The app listens on `http://127.0.0.1:5000` by default.
 Override host/port with environment variables:
 
 ```bash
-PORT=8000 HOST=0.0.0.0 python run.py
+# Linux / macOS
+PORT=8000 HOST=0.0.0.0 python3 run.py
+
+# Windows PowerShell
+$env:PORT=8000; $env:HOST="0.0.0.0"; py -3 run.py
 ```
 
 ### First-time setup
@@ -223,13 +265,34 @@ On startup the app:
 
 No SQL imports or manual configuration required.
 
+### Verify the server is running
+
+```bash
+# Read bootstrap password (Linux / macOS)
+BOOTSTRAP_PW=$(python3 -c "import json; print(json.load(open('instance/config.json'))['ADMIN_BOOTSTRAP_PASSWORD'])")
+
+# Confirm the API responds
+curl -s http://127.0.0.1:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
+  | python3 -m json.tool
+
+# Windows (PowerShell) — read password and hit /api/auth/me with a token
+$pw = (Get-Content instance\config.json | ConvertFrom-Json).ADMIN_BOOTSTRAP_PASSWORD
+$r  = Invoke-RestMethod http://127.0.0.1:5000/api/auth/login `
+        -Method POST -ContentType "application/json" `
+        -Body "{`"username`":`"admin`",`"password`":`"$pw`"}"
+Invoke-RestMethod http://127.0.0.1:5000/api/auth/me `
+  -Headers @{Authorization="Bearer $($r.token)"}
+```
+
 ### Cross-platform notes
 
-| Platform | Command |
-|----------|---------|
-| Linux / macOS | `python run.py` or `python3 run.py` |
-| Windows (cmd) | `py -3 run.py` |
-| Windows (PowerShell) | `py -3 run.py` |
+| Platform | Start command | Override port |
+|----------|---------------|---------------|
+| Linux / macOS | `python3 run.py` | `PORT=8000 python3 run.py` |
+| Windows (cmd) | `py -3 run.py` | `set PORT=8000 && py -3 run.py` |
+| Windows (PowerShell) | `py -3 run.py` | `$env:PORT=8000; py -3 run.py` |
 
 ---
 
@@ -324,6 +387,170 @@ repo/
 
 ---
 
+## Financial Summary Endpoints (AR / AP / Reconciliation)
+
+All three endpoints require **admin or auditor** role. Every access is audit-logged under
+`AR_SUMMARY_ACCESSED`, `AP_SUMMARY_ACCESSED`, or `RECONCILIATION_ACCESSED`.
+
+### GET /api/ledger/ar-summary — Accounts Receivable
+
+Returns outstanding amounts owed **to** users as invoice issuers (status: `issued` / `overdue`).
+
+**Query parameters**
+
+| Parameter   | Type   | Description                                       |
+|-------------|--------|---------------------------------------------------|
+| `from_date` | string | ISO-8601 lower bound on `issued_at` (optional)    |
+| `to_date`   | string | ISO-8601 upper bound on `issued_at` (optional)    |
+| `issuer_id` | int    | Restrict to a single issuer (optional)            |
+
+**Sample request**
+
+```bash
+TOKEN=<admin-or-auditor-jwt>
+
+curl -s "http://localhost:8000/api/ledger/ar-summary" \
+  -H "Authorization: Bearer $TOKEN" | python -m json.tool
+```
+
+**Sample response**
+
+```json
+{
+  "generated_at": "2026-04-08T10:00:00+00:00",
+  "filters": { "from_date": null, "to_date": null, "issuer_id": null },
+  "totals": {
+    "invoice_count": 3,
+    "total_invoiced": 750.0,
+    "total_outstanding": 600.0,
+    "overdue_amount": 200.0,
+    "overdue_count": 1
+  },
+  "by_status": {
+    "issued":  { "count": 2, "outstanding_amount": 400.0 },
+    "overdue": { "count": 1, "outstanding_amount": 200.0 }
+  },
+  "by_issuer": [
+    {
+      "issuer_id": 2, "issuer_name": "alice",
+      "invoice_count": 3, "total_invoiced": 750.0,
+      "total_outstanding": 600.0, "overdue_count": 1, "overdue_amount": 200.0
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/ledger/ap-summary — Accounts Payable
+
+Returns outstanding amounts owed **by** users as invoice payers (status: `issued` / `overdue`).
+
+**Query parameters**
+
+| Parameter   | Type   | Description                                       |
+|-------------|--------|---------------------------------------------------|
+| `from_date` | string | ISO-8601 lower bound on `issued_at` (optional)    |
+| `to_date`   | string | ISO-8601 upper bound on `issued_at` (optional)    |
+| `payer_id`  | int    | Restrict to a single payer (optional)             |
+
+**Sample request**
+
+```bash
+curl -s "http://localhost:8000/api/ledger/ap-summary?payer_id=3" \
+  -H "Authorization: Bearer $TOKEN" | python -m json.tool
+```
+
+**Sample response**
+
+```json
+{
+  "generated_at": "2026-04-08T10:00:00+00:00",
+  "filters": { "from_date": null, "to_date": null, "payer_id": 3 },
+  "totals": {
+    "invoice_count": 2,
+    "total_owed": 400.0,
+    "overdue_amount": 200.0,
+    "overdue_count": 1
+  },
+  "by_status": {
+    "issued":  { "count": 1, "amount_owed": 200.0 },
+    "overdue": { "count": 1, "amount_owed": 200.0 }
+  },
+  "by_payer": [
+    {
+      "payer_id": 3, "payer_name": "bob",
+      "invoice_count": 2, "total_owed": 400.0,
+      "overdue_count": 1, "overdue_amount": 200.0
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/ledger/reconciliation-summary — Reconciliation
+
+Cross-checks every paid/refunded invoice against the immutable ledger to detect
+amount mismatches. A record is **reconciled** when the payer's debit ledger entry
+and the issuer's credit ledger entry each equal the original invoice amount.
+
+**Query parameters**
+
+| Parameter   | Type   | Description                                       |
+|-------------|--------|---------------------------------------------------|
+| `from_date` | string | ISO-8601 lower bound on `paid_at` (optional)      |
+| `to_date`   | string | ISO-8601 upper bound on `paid_at` (optional)      |
+
+**Sample request**
+
+```bash
+curl -s "http://localhost:8000/api/ledger/reconciliation-summary" \
+  -H "Authorization: Bearer $TOKEN" | python -m json.tool
+```
+
+**Sample response**
+
+```json
+{
+  "generated_at": "2026-04-08T10:00:00+00:00",
+  "filters": { "from_date": null, "to_date": null },
+  "totals": {
+    "invoices_examined": 5,
+    "total_invoiced": 1250.0,
+    "total_collected": 1100.0
+  },
+  "reconciliation": {
+    "reconciled": 5,
+    "discrepant": 0,
+    "unmatched":  0
+  },
+  "discrepancies": []
+}
+```
+
+A non-empty `discrepancies` list means an invoice was marked paid but its ledger
+entries are missing or have wrong amounts — this would indicate data integrity issues
+requiring investigation.
+
+---
+
+## Ledger / Audit Immutability (DB Triggers)
+
+In addition to application-layer INSERT-only conventions, **SQLite `BEFORE UPDATE`
+and `BEFORE DELETE` triggers** are installed on `ledger_entries` and `audit_logs`.
+Any attempt to modify or remove a row raises:
+
+```
+IMMUTABLE VIOLATION: UPDATE on ledger_entries is forbidden.
+Ledger records are append-only; use a correcting entry instead.
+```
+
+The triggers are created with `IF NOT EXISTS` and are applied on every app startup
+via `init_db()`, so they are present in both new and existing databases.
+
+---
+
 ## Security Notes
 
 - All passwords hashed with PBKDF2-SHA256 (600,000 iterations)
@@ -332,6 +559,6 @@ repo/
 - Session cookie uses httpOnly + SameSite=Strict and `Secure` outside localhost HTTP
 - Identity documents encrypted with AES-256-GCM
 - Offline payment records signed with HMAC-SHA256
-- Audit log entries form a tamper-evident SHA-256 hash chain
-- Ledger entries form a tamper-evident SHA-256 hash chain
+- Audit log entries form a tamper-evident SHA-256 hash chain (+ DB triggers)
+- Ledger entries form a tamper-evident SHA-256 hash chain (+ DB triggers)
 - No external API calls — fully offline compliant

@@ -429,6 +429,38 @@ CREATE INDEX IF NOT EXISTS idx_op_status     ON offline_payments(status);
 CREATE INDEX IF NOT EXISTS idx_op_created_at ON offline_payments(created_at);
 
 -- =========================================================
+-- 13. IMMUTABILITY TRIGGERS
+-- Block any UPDATE or DELETE on ledger_entries and audit_logs.
+-- These tables are append-only by design; tampering is detected
+-- via hash chain verification.  The triggers provide DB-layer
+-- enforcement in addition to application-layer conventions.
+-- =========================================================
+
+CREATE TRIGGER IF NOT EXISTS trg_ledger_no_update
+BEFORE UPDATE ON ledger_entries
+BEGIN
+    SELECT RAISE(ABORT, 'IMMUTABLE VIOLATION: UPDATE on ledger_entries is forbidden. Ledger records are append-only; use a correcting entry instead.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_ledger_no_delete
+BEFORE DELETE ON ledger_entries
+BEGIN
+    SELECT RAISE(ABORT, 'IMMUTABLE VIOLATION: DELETE on ledger_entries is forbidden. Ledger records are append-only and cannot be removed.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_no_update
+BEFORE UPDATE ON audit_logs
+BEGIN
+    SELECT RAISE(ABORT, 'IMMUTABLE VIOLATION: UPDATE on audit_logs is forbidden. Audit records are append-only to preserve chain integrity.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_no_delete
+BEFORE DELETE ON audit_logs
+BEGIN
+    SELECT RAISE(ABORT, 'IMMUTABLE VIOLATION: DELETE on audit_logs is forbidden. Audit records are append-only to preserve chain integrity.');
+END;
+
+-- =========================================================
 -- 10. IDEMPOTENCY KEYS
 -- Caches responses for critical mutating operations.
 -- =========================================================

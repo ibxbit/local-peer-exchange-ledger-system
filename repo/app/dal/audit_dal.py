@@ -85,6 +85,9 @@ ACTION_CATEGORIES: dict[str, str] = {
     'VERIFICATION_LIST_ACCESSED':   'data_access',
     'VERIFICATION_DOCUMENT_ACCESSED': 'data_access',
     'VERIFICATION_FINGERPRINT_MISMATCH': 'data_access',
+    'AR_SUMMARY_ACCESSED':          'data_access',
+    'AP_SUMMARY_ACCESSED':          'data_access',
+    'RECONCILIATION_ACCESSED':      'data_access',
 
     # admin
     'USER_UPDATED':                 'admin',

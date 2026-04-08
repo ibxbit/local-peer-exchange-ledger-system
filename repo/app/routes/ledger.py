@@ -1,14 +1,34 @@
-"""Ledger routes — balance, credit/debit (admin), transfer, invoices, chain verify."""
+"""Ledger routes — balance, credit/debit (admin), transfer, invoices, chain verify,
+AR/AP summaries, and reconciliation."""
 
+import re
 from flask import Blueprint, request, jsonify, g
 from app.models import db
 from app.utils import (login_required, admin_required,
                         auditor_or_admin_required,
                         check_idempotency, store_idempotency)
-from app.services import ledger_service
+from app.services import ledger_service, financial_summary_service
 from app.dal import ledger_dal, user_dal, invoice_dal
 
 ledger_bp = Blueprint('ledger', __name__)
+
+_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _parse_date_param(value, param_name):
+    """
+    Validate an optional YYYY-MM-DD query param.
+    Returns (value_or_None, error_tuple_or_None).
+    error_tuple is (json_response, 400) when the value is present but malformed.
+    """
+    if not value:
+        return None, None
+    if not _DATE_RE.match(value):
+        return None, (
+            jsonify({'error': f"'{param_name}' must be a date in YYYY-MM-DD format."}),
+            400,
+        )
+    return value, None
 
 
 @ledger_bp.route('', methods=['GET'])
@@ -289,3 +309,127 @@ def mark_overdue():
     with db() as conn:
         count = ledger_service.mark_overdue_invoices(conn)
     return jsonify({'message': f'{count} invoice(s) marked overdue.', 'count': count}), 200
+
+
+# ---------------------------------------------------------------------------
+# Financial Summaries — AR / AP / Reconciliation
+# Requires admin or auditor role.  All accesses are audit-logged.
+# ---------------------------------------------------------------------------
+
+@ledger_bp.route('/ar-summary', methods=['GET'])
+@auditor_or_admin_required
+def ar_summary():
+    """
+    Accounts Receivable summary.
+
+    Query parameters:
+      from_date  — ISO-8601 date string lower bound on issued_at (optional)
+      to_date    — ISO-8601 date string upper bound on issued_at (optional)
+      issuer_id  — restrict to a single issuer (optional)
+
+    Response schema:
+      generated_at  — ISO-8601 timestamp of report generation
+      filters       — echo of applied filters
+      totals        — {invoice_count, total_invoiced, total_outstanding,
+                       overdue_amount, overdue_count}
+      by_status     — {issued: {count, outstanding_amount},
+                       overdue: {count, outstanding_amount}}
+      by_issuer     — list of {issuer_id, issuer_name, invoice_count,
+                               total_invoiced, total_outstanding,
+                               overdue_count, overdue_amount}
+    """
+    from_date, err = _parse_date_param(request.args.get('from_date'), 'from_date')
+    if err:
+        return err
+    to_date, err = _parse_date_param(request.args.get('to_date'), 'to_date')
+    if err:
+        return err
+    issuer_id = request.args.get('issuer_id')
+    if issuer_id:
+        try:
+            issuer_id = int(issuer_id)
+        except ValueError:
+            return jsonify({'error': 'issuer_id must be an integer.'}), 400
+
+    with db() as conn:
+        result = financial_summary_service.get_ar_summary(
+            conn, actor_id=g.user_id,
+            from_date=from_date, to_date=to_date, issuer_id=issuer_id,
+        )
+    return jsonify(result), 200
+
+
+@ledger_bp.route('/ap-summary', methods=['GET'])
+@auditor_or_admin_required
+def ap_summary():
+    """
+    Accounts Payable summary.
+
+    Query parameters:
+      from_date  — ISO-8601 date string lower bound on issued_at (optional)
+      to_date    — ISO-8601 date string upper bound on issued_at (optional)
+      payer_id   — restrict to a single payer (optional)
+
+    Response schema:
+      generated_at  — ISO-8601 timestamp of report generation
+      filters       — echo of applied filters
+      totals        — {invoice_count, total_owed, overdue_amount, overdue_count}
+      by_status     — {issued: {count, amount_owed},
+                       overdue: {count, amount_owed}}
+      by_payer      — list of {payer_id, payer_name, invoice_count,
+                               total_owed, overdue_count, overdue_amount}
+    """
+    from_date, err = _parse_date_param(request.args.get('from_date'), 'from_date')
+    if err:
+        return err
+    to_date, err = _parse_date_param(request.args.get('to_date'), 'to_date')
+    if err:
+        return err
+    payer_id  = request.args.get('payer_id')
+    if payer_id:
+        try:
+            payer_id = int(payer_id)
+        except ValueError:
+            return jsonify({'error': 'payer_id must be an integer.'}), 400
+
+    with db() as conn:
+        result = financial_summary_service.get_ap_summary(
+            conn, actor_id=g.user_id,
+            from_date=from_date, to_date=to_date, payer_id=payer_id,
+        )
+    return jsonify(result), 200
+
+
+@ledger_bp.route('/reconciliation-summary', methods=['GET'])
+@auditor_or_admin_required
+def reconciliation_summary():
+    """
+    Reconciliation summary — cross-checks paid/refunded invoices against
+    the immutable ledger to detect any amount mismatches.
+
+    Query parameters:
+      from_date  — ISO-8601 date string lower bound on paid_at (optional)
+      to_date    — ISO-8601 date string upper bound on paid_at (optional)
+
+    Response schema:
+      generated_at    — ISO-8601 timestamp of report generation
+      filters         — echo of applied filters
+      totals          — {invoices_examined, total_invoiced, total_collected}
+      reconciliation  — {reconciled, discrepant, unmatched}
+      discrepancies   — list of {invoice_id, invoice_number, invoice_amount,
+                                 amount_paid, status, ledger_payer_debits,
+                                 ledger_issuer_credits, issue}
+    """
+    from_date, err = _parse_date_param(request.args.get('from_date'), 'from_date')
+    if err:
+        return err
+    to_date, err = _parse_date_param(request.args.get('to_date'), 'to_date')
+    if err:
+        return err
+
+    with db() as conn:
+        result = financial_summary_service.get_reconciliation_summary(
+            conn, actor_id=g.user_id,
+            from_date=from_date, to_date=to_date,
+        )
+    return jsonify(result), 200
