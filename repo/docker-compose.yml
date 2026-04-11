@@ -18,7 +18,7 @@ services:
       start_period: 15s
 
   e2e:
-    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    image: mcr.microsoft.com/playwright:v1.59.1-noble
     volumes:
       - .:/work
     working_dir: /work
