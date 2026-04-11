@@ -11,11 +11,24 @@ services:
       - PORT=8000
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/auth/login', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    volumes:
+      - .:/work
+    working_dir: /work
+    environment:
+      - BASE_URL=http://api:8000
+      - PEX_E2E_USE_EXTERNAL_SERVER=1
+    command: /bin/sh -c "npm install && npx playwright test"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   instance_data:

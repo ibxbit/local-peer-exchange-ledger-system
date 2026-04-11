@@ -14,6 +14,18 @@ def create_app() -> Flask:
     )
     app.config.from_object(Config)
 
+    # ---------------------------------------------------------------------------
+    # Logging Security — Register the redaction and format-string filter
+    # ---------------------------------------------------------------------------
+    import logging
+    from app.core.log_filter import SensitiveDataFilter
+    secure_filter = SensitiveDataFilter()
+
+    # Flask/Werkzeug default access logs
+    logging.getLogger('werkzeug').addFilter(secure_filter)
+    # Uvicorn access logs (if running in Docker/Asgi)
+    logging.getLogger('uvicorn.access').addFilter(secure_filter)
+
     with app.app_context():
         init_db()
         _seed_admin()

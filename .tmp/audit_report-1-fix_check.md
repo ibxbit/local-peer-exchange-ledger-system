@@ -1,25 +1,49 @@
-# Audit Review: AR/AP & Immutability Issues (April 8, 2026)
+# Previous Issues Recheck
 
-## 1. AR/AP Calculation and Reconciliation Endpoints
-**Status: FIXED**
-- **Evidence:**
-  - `repo/app/routes/ledger.py` now includes:
-    - `/ar-summary` (GET): Accounts Receivable summary endpoint.
-    - `/ap-summary` (GET): Accounts Payable summary endpoint.
-    - `/reconciliation-summary` (GET): Reconciliation summary endpoint.
-  - All endpoints support date/user filters and return detailed summary data.
-  - Service and DAL layers (`financial_summary_service.py`, `financial_summary_dal.py`) implement AR/AP/reconciliation logic.
-- **Conclusion:** The required AR/AP and reconciliation summary endpoints are now present and implemented as specified.
+Date: 2026-04-08
 
-## 2. DB-Layer Immutability Enforcement
-**Status: FIXED**
-- **Evidence:**
-  - `repo/app/models.py` now defines explicit SQLite triggers:
-    - `trg_ledger_no_update` and `trg_ledger_no_delete` block UPDATE/DELETE on `ledger_entries`.
-    - `trg_audit_no_update` and `trg_audit_no_delete` block UPDATE/DELETE on `audit_logs`.
-  - Triggers use `RAISE(ABORT, ...)` to enforce append-only behavior at the database level.
-- **Conclusion:** Immutability is now enforced at the DB layer, not just by application convention.
+## Recheck Summary
 
----
-**Summary:**
-Both previously reported issues (missing AR/AP/reconciliation endpoints and lack of DB-level immutability) have been addressed and are now fixed in the current codebase.
+| Issue from previous inspection | Status | Notes |
+|---|---|---|
+| Non-Docker startup guidance missing/weak | Fixed | README now has explicit non-Docker quick start and verification commands. |
+| AR/AP malformed date validation evidence weak | Fixed | Route-level date validation exists + API tests added and passing. |
+| Browser E2E verification evidence missing | Not fixed (currently failing) | E2E test exists but currently times out in this environment/run. |
+
+## Evidence
+
+### 1) Non-Docker startup guidance
+
+- `README.md:9` shows `Without Docker (recommended for local dev)`.
+- `README.md:13` includes dependency install: `pip install -r requirements.txt`.
+- `README.md:17` and `README.md:19` include start commands: `python3 run.py` and `py -3 run.py`.
+- Additional dedicated section exists: `README.md:228` (`Running Without Docker (Local Development)`).
+
+### 2) AR/AP date validation and tests
+
+- Date param validator implemented in route layer:
+  - `app/routes/ledger.py:15` (`_DATE_RE`)
+  - `app/routes/ledger.py:18` (`_parse_date_param`)
+  - Used by AR/AP routes at `app/routes/ledger.py:341`, `app/routes/ledger.py:344`, `app/routes/ledger.py:382`, `app/routes/ledger.py:385`.
+- New date-validation tests present:
+  - `API_tests/test_financial_summary_api.py:294` (`TestDateFilterValidation`)
+  - AR invalid-date checks at `API_tests/test_financial_summary_api.py:302` onward.
+  - AP invalid-date checks at `API_tests/test_financial_summary_api.py:349` onward.
+- Runtime verification:
+  - Command: `py -3 -m pytest API_tests/test_financial_summary_api.py -q`
+  - Result: `44 passed in 12.17s`.
+
+### 3) E2E verification
+
+- E2E wiring still exists:
+  - `package.json:7` (`test:e2e`)
+  - `playwright.config.js:7` and `e2e_tests/smoke.spec.js:71`.
+- Runtime execution result:
+  - Command: `npm run test:e2e`
+  - Result: **failed** (`1 failed`) with timeout at `e2e_tests/smoke.spec.js:129`.
+  - Failure evidence: Playwright timeout waiting for `#l-user`; repeated navigation/`/api/auth/me` 401 loop in run log.
+
+## Final Status
+
+- Previously reported backend/documentation gaps are fixed.
+- Remaining actionable gap: E2E smoke test is not passing and should be debugged before claiming complete closure.
