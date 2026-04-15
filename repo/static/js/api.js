@@ -58,7 +58,13 @@ export const API = {
       const data = await res.json().catch(() => ({}));
 
       // Auto-logout on 401: clear local state and reload to show login screen.
-      if (res.status === 401 && path !== '/auth/login') {
+      // `/auth/login` is excluded so the auth UI can render the credential
+      // error. `/auth/me` is also excluded because it's the boot-time probe —
+      // a 401 there just means "not logged in yet" and triggering a reload
+      // would race renderAuth() and leave the page stuck on "Starting…".
+      if (res.status === 401
+          && path !== '/auth/login'
+          && path !== '/auth/me') {
         this.clearUser();
         window.location.reload();
       }

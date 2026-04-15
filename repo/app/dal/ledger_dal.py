@@ -64,6 +64,7 @@ def list_entries(conn, user_id: int = None,
         if user_id:
             query += ' AND l.user_id = ?'
             params.append(user_id)
+        order_by = ' ORDER BY l.id DESC LIMIT ? OFFSET ?'
     else:
         query = (
             'SELECT id, transaction_type, amount, balance_after, '
@@ -71,10 +72,12 @@ def list_entries(conn, user_id: int = None,
             'FROM ledger_entries WHERE user_id = ?'
         )
         params = [user_id]
+        order_by = ' ORDER BY id DESC LIMIT ? OFFSET ?'
 
     total = conn.execute(f'SELECT COUNT(*) FROM ({query})', params).fetchone()[0]
-    query += ' ORDER BY id DESC LIMIT ? OFFSET ?'
-    rows = rows_to_list(conn.execute(query, params + [limit, offset]).fetchall())
+    rows = rows_to_list(
+        conn.execute(query + order_by, params + [limit, offset]).fetchall()
+    )
     return rows, total
 
 

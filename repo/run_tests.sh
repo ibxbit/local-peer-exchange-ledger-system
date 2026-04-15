@@ -41,7 +41,11 @@ echo ""
 echo "------------------------------------------------------------"
 echo "  API TESTS  (API_tests/)"
 echo "------------------------------------------------------------"
-docker compose run --rm api pytest API_tests/ \
+# API_tests include test_auth_cookie which asserts the Secure flag is set
+# when the request arrives from a non-local host. The api service runs with
+# PEX_SESSION_COOKIE_SECURE=0 for E2E browser tests (plain HTTP), so we
+# re-enable the flag here for the API-test container only.
+docker compose run --rm -e PEX_SESSION_COOKIE_SECURE=1 api pytest API_tests/ \
     -v \
     --tb=short \
     --no-header \
@@ -65,7 +69,19 @@ docker compose run --rm api pytest frontend_tests/ \
 FE_EXIT=$?
 
 # ---------------------------------------------------------------------------
-# 5. E2E tests (Browser smoke tests)
+# 5. Client-side JS unit tests (Vitest + happy-dom)
+# Stubs fetch and exercises static/js/api.js in isolation — no API server.
+# ---------------------------------------------------------------------------
+echo ""
+echo "------------------------------------------------------------"
+echo "  CLIENT-SIDE JS TESTS  (static/js/__tests__/)"
+echo "------------------------------------------------------------"
+docker compose run --rm js-unit
+
+JS_EXIT=$?
+
+# ---------------------------------------------------------------------------
+# 6. E2E tests (Browser smoke tests)
 # ---------------------------------------------------------------------------
 echo ""
 echo "------------------------------------------------------------"
@@ -83,11 +99,11 @@ echo "[cleanup] Stopping any remaining containers..."
 docker compose down --remove-orphans > /dev/null 2>&1
 
 # ---------------------------------------------------------------------------
-# 6. Summary
+# 7. Summary
 # ---------------------------------------------------------------------------
 echo ""
 echo "============================================================"
-if [ $UNIT_EXIT -eq 0 ] && [ $API_EXIT -eq 0 ] && [ $FE_EXIT -eq 0 ] && [ $E2E_EXIT -eq 0 ]; then
+if [ $UNIT_EXIT -eq 0 ] && [ $API_EXIT -eq 0 ] && [ $FE_EXIT -eq 0 ] && [ $JS_EXIT -eq 0 ] && [ $E2E_EXIT -eq 0 ]; then
     echo "  ALL TESTS PASSED"
     exit 0
 else
@@ -95,6 +111,7 @@ else
     [ $UNIT_EXIT -ne 0 ] && echo "  Unit tests:     FAILED (exit $UNIT_EXIT)"
     [ $API_EXIT  -ne 0 ] && echo "  API tests:      FAILED (exit $API_EXIT)"
     [ $FE_EXIT   -ne 0 ] && echo "  Frontend tests: FAILED (exit $FE_EXIT)"
+    [ $JS_EXIT   -ne 0 ] && echo "  JS unit tests:  FAILED (exit $JS_EXIT)"
     [ $E2E_EXIT  -ne 0 ] && echo "  E2E tests:      FAILED (exit $E2E_EXIT)"
     exit 1
 fi

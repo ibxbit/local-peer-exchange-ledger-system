@@ -2,13 +2,21 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      # Host port 8001 avoids collision with other projects already squatting
+      # 8000 on this workstation. Internal container port (and e2e's api:8000
+      # hostname) is unchanged.
+      - "8001:8000"
     volumes:
       - instance_data:/app/instance
     environment:
       - PYTHONUNBUFFERED=1
       - HOST=0.0.0.0
       - PORT=8000
+      # Docker dev/test runs plain HTTP — browsers reject Secure-flagged
+      # cookies over HTTP, which would silently break the SPA login flow
+      # (POST succeeds, cookie dropped, next API call 401s, SPA reloads to
+      # login). Set this to 1 (or unset it) when deploying behind HTTPS.
+      - PEX_SESSION_COOKIE_SECURE=0
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"]
@@ -29,6 +37,18 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Client-side JS unit tests (Vitest + happy-dom). Reuses the Playwright
+  # image because it already ships a recent Node + npm toolchain, which
+  # avoids pulling a separate node:* image just for `vitest run`. There is
+  # no service dependency on `api` — the tests stub global.fetch and never
+  # cross the network.
+  js-unit:
+    image: mcr.microsoft.com/playwright:v1.59.1-noble
+    volumes:
+      - .:/work
+    working_dir: /work
+    command: /bin/sh -c "npm install && npx vitest run"
 
 volumes:
   instance_data:
