@@ -50,6 +50,12 @@ async function login(request, username, password) {
   return { resp, data };
 }
 
+// Captured at runtime by getAdminToken() so uiLoginAdmin can drive the SPA
+// login form with the same password the API-side helper just proved works
+// (relevant when rotation is disabled and the admin is still on the
+// demo/bootstrap password rather than ADMIN_ROTATED_PASSWORD).
+let WORKING_ADMIN_PASSWORD = ADMIN_ROTATED_PASSWORD;
+
 async function getAdminToken(request) {
   const bootstrapPassword = loadBootstrapPassword();
   let token = null;
@@ -64,6 +70,10 @@ async function getAdminToken(request) {
   if (bootstrapPassword) {
     candidates.push(bootstrapPassword);
   }
+  // Demo-mode fallback — matches docker-compose.yml's
+  // PEX_ADMIN_BOOTSTRAP_PASSWORD when instance/config.json is not reachable
+  // from the Playwright container (named volume mount).
+  candidates.push('Admin@Demo123!');
 
   for (const candidate of candidates) {
     const { resp, data } = await login(request, 'admin', candidate);
@@ -90,8 +100,10 @@ async function getAdminToken(request) {
     const relogin = await login(request, 'admin', ADMIN_ROTATED_PASSWORD);
     expect(relogin.resp.ok()).toBeTruthy();
     token = relogin.data.token;
+    usedPassword = ADMIN_ROTATED_PASSWORD;
   }
 
+  WORKING_ADMIN_PASSWORD = usedPassword;
   return token;
 }
 
@@ -156,7 +168,7 @@ async function provisionUser(request, adminHeaders, opts = {}) {
 async function uiLoginAdmin(page) {
   await page.goto('/');
   await page.fill('#l-user', 'admin');
-  await page.fill('#l-pass', ADMIN_ROTATED_PASSWORD);
+  await page.fill('#l-pass', WORKING_ADMIN_PASSWORD);
   await page.click('#btn-login');
   await expect(page.locator('#btn-logout')).toBeVisible();
 }

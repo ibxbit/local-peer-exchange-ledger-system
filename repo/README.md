@@ -1,365 +1,269 @@
+Project Type: fullstack
+
 # SkillShare Platform
 
-A peer skill-exchange platform with ledger, identity verification, admin moderation, analytics, and offline payment support.
+A peer skill-exchange platform with ledger, identity verification, admin
+moderation, analytics, and offline payment support.
+
+- **Backend**: Flask (Python 3.11), SQLite, APScheduler
+- **Frontend**: Vanilla JS SPA (ES modules) + HTMX for live partials
+- **Tests**: Pytest (unit + API + frontend) · Vitest (JS unit) · Playwright (E2E)
 
 ---
 
-## Quick Start
+## Quick Start (Docker — the only supported path)
 
-### Without Docker (recommended for local dev)
-
-```bash
-# 1. Install Python dependencies
-pip install -r requirements.txt
-
-# 2. Start the server  (auto-creates instance/config.json and instance/app.db)
-#    Linux / macOS:
-python3 run.py
-#    Windows:
-py -3 run.py
-```
-
-The app starts on `http://127.0.0.1:5000` by default.  
-Read the bootstrap password and verify the API is up:
+Everything runs inside Docker. **No `pip install`, no `npm install`, no manual
+database setup**, and no local Python interpreter is required.
 
 ```bash
-# Read the generated admin password (Linux/macOS)
-BOOTSTRAP_PW=$(python3 -c "import json; print(json.load(open('instance/config.json'))['ADMIN_BOOTSTRAP_PASSWORD'])")
-
-# Verify login works
-curl -s http://127.0.0.1:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
-  | python3 -m json.tool
+docker-compose up
 ```
 
-Expected response: `{"token": "...", "user": {"role": "admin", ...}}`
-
-### With Docker
+The equivalent modern form works identically:
 
 ```bash
 docker compose up
 ```
 
-The application auto-seeds an admin account and initialises the SQLite database on first run.
-Address: `http://localhost:8000`
+On first boot the application container:
+
+1. Creates `instance/config.json` with the demo secrets.
+2. Initialises `instance/app.db` (SQLite) and applies all migrations.
+3. Seeds three demo accounts (see the **Demo Credentials** section below).
+4. Binds Flask to `0.0.0.0:8000` inside the container, published to the host
+   as `http://localhost:8001`.
+
+When the container is up you will see `Running on http://0.0.0.0:8000` in the
+logs; the app is then reachable at:
+
+- **Web UI (SPA)**:  http://localhost:8001/
+- **REST API root**: http://localhost:8001/api/
+
+Stop it with `Ctrl-C`, or run it detached: `docker-compose up -d`.
 
 ---
 
-## Services
+## Demo Credentials
 
-| Service | Address | Description |
-|---------|---------|-------------|
-| Application (API + UI) | http://localhost:8000 | Flask app — REST API and frontend |
+The Docker stack seeds one account per role. Credentials are **deterministic**
+— they are re-applied every time the container starts, so you can log in
+immediately without scraping `instance/config.json`.
 
-All REST endpoints are prefixed with `/api/`. The frontend SPA is served at `/`.
+| Role     | Username    | Password          | Notes                                      |
+|----------|-------------|-------------------|--------------------------------------------|
+| Admin    | `admin`     | `Admin@Demo123!`  | Full administrative access                 |
+| Auditor  | `auditor`   | `Auditor@Demo123!`| Read-only audit + analytics + ledger views |
+| User     | `demo_user` | `User@Demo123!`   | Standard user account (500 credits)        |
 
----
+All three accounts are real rows in the `users` table (role column enforced),
+not mocks. Password rotation is disabled in Docker, so these credentials stay
+valid for the lifetime of the container.
 
-## Bootstrap Admin Credentials
-
-| Field | Value |
-|-------|-------|
-| Username | `admin` |
-| Password source | `instance/config.json` -> `ADMIN_BOOTSTRAP_PASSWORD` |
-
-On first login, the admin must change password before privileged actions.
-
----
-
-## API Endpoint Summary
-
-| Prefix | Description |
-|--------|-------------|
-| `POST /api/auth/register` | Register a new user |
-| `POST /api/auth/login` | Login and receive JWT |
-| `GET  /api/auth/me` | Get current user profile |
-| `GET  /api/users` | List users (admin only) |
-| `GET  /api/ledger/balance` | Check credit balance |
-| `POST /api/ledger/credit` | Credit a user (admin only) |
-| `POST /api/ledger/transfer` | Peer credit transfer |
-| `POST /api/ledger/invoices` | Create an invoice |
-| `POST /api/payments/submit` | Submit offline payment (cash/check/ACH) |
-| `POST /api/payments/<id>/confirm` | Confirm payment and credit account (admin) |
-| `POST /api/payments/<id>/refund` | Refund a confirmed payment (admin) |
-| `GET  /api/ledger/ar-summary` | Accounts Receivable summary (admin/auditor) |
-| `GET  /api/ledger/ap-summary` | Accounts Payable summary (admin/auditor) |
-| `GET  /api/ledger/reconciliation-summary` | Invoice ↔ ledger reconciliation (admin/auditor) |
-| `GET  /api/audit/logs` | Audit log listing (admin/auditor) |
-| `GET  /api/audit/logs/summary` | Event counts by category |
-| `GET  /api/audit/logs/verify` | SHA-256 chain integrity check |
-| `GET  /api/analytics/kpis` | KPI dashboard |
-| `GET  /api/analytics/export` | CSV export (kpi or daily) |
-| `POST /api/admin/violations` | Report a violation |
-| `PUT  /api/admin/users/<id>/ban` | Ban a user |
-| `PUT  /api/admin/users/<id>/unban` | Unban a user |
-| `GET  /api/admin/resources` | List schedule inventory resources |
-| `POST /api/admin/resources` | Create schedule inventory resource |
-| `PUT  /api/admin/resources/<id>` | Update schedule inventory resource |
-| `DELETE /api/admin/resources/<id>` | Deactivate schedule inventory resource |
-| `GET  /api/matching/search` | Search peers by skill / tag / time slot |
-| `POST /api/matching/profile` | Create / update matching profile |
-| `POST /api/matching/queue` | Join the auto-match queue |
-| `PUT  /api/matching/queue/<id>/cancel` | Cancel a waiting queue entry |
-| `POST /api/matching/sessions` | Request a session with a peer |
-| `GET  /api/matching/peers-partial` | HTMX: peer search HTML fragment |
-| `GET  /api/matching/queue/<id>/status-partial` | HTMX: queue status HTML fragment (polls every 10 s) |
-| `GET  /api/matching/sessions-partial` | HTMX: session table HTML fragment |
+> **Custom passwords**: override `PEX_ADMIN_BOOTSTRAP_PASSWORD`,
+> `PEX_DEMO_AUDITOR_PASSWORD`, `PEX_DEMO_USER_PASSWORD` in
+> `docker-compose.yml` if you need different demo credentials.
 
 ---
 
-## Step-by-Step Verification Guide
+## Verifying the system works
 
-### 1. Start the application
+### 1. Probe the API is reachable
 
 ```bash
-docker compose up
+curl -s http://localhost:8001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin@Demo123!"}' | python -m json.tool
 ```
 
-Wait for the line: `Running on http://0.0.0.0:8000`
+Expected response (abridged):
 
-### 2. Verify the API is reachable
-
-```bash
-BOOTSTRAP_PW=$(python - <<'PY'
-import json
-print(json.load(open('instance/config.json'))['ADMIN_BOOTSTRAP_PASSWORD'])
-PY
-)
-
-curl -s http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" | python -m json.tool
+```json
+{
+  "token": "eyJ...",
+  "user": { "username": "admin", "role": "admin", ... }
+}
 ```
 
-Expected: `{"token": "...", "user": {"role": "admin", ...}}`
-
-If `user.must_change_password` is `true`, rotate immediately:
+### 2. Confirm each role can authenticate
 
 ```bash
-TOKEN=$(curl -s http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
+for role in admin auditor demo_user; do
+  case $role in
+    admin)     pw='Admin@Demo123!' ;;
+    auditor)   pw='Auditor@Demo123!' ;;
+    demo_user) pw='User@Demo123!' ;;
+  esac
+  echo "-- $role --"
+  curl -s http://localhost:8001/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$role\",\"password\":\"$pw\"}" | python -m json.tool
+done
+```
+
+Each request should return a JSON body containing a `token` field and the
+user's `role`.
+
+### 3. Admin KPI dashboard
+
+```bash
+TOKEN=$(curl -s http://localhost:8001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin@Demo123!"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
-curl -s http://localhost:8000/api/auth/change-password \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"current_password\":\"$BOOTSTRAP_PW\",\"new_password\":\"Admin@Rotate123456!\"}" \
-  | python -m json.tool
-```
-
-### 3. Register a user
-
-```bash
-curl -s http://localhost:8000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","email":"alice@example.com","password":"Alice@123456!"}' \
-  | python -m json.tool
-```
-
-Expected: `{"message": "Registration successful.", "user_id": 2}`
-
-### 4. Credit a user (admin)
-
-```bash
-# Get admin token first
-TOKEN=$(curl -s http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
-  | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
-
-curl -s http://localhost:8000/api/ledger/credit \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":2,"amount":500,"description":"Welcome bonus"}' \
-  | python -m json.tool
-```
-
-Expected: `{"message": "Credits added.", "new_balance": 500.0}`
-
-### 5. Submit an offline payment
-
-```bash
-USER_TOKEN=$(curl -s http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"Alice@123456!"}' \
-  | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
-
-curl -s http://localhost:8000/api/payments/submit \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"amount":200,"payment_type":"check","reference_number":"CHK-00001"}' \
-  | python -m json.tool
-```
-
-Expected: `{"payment_id": 1, "signature": "<64-char hex>"}`
-
-### 6. Confirm the payment (admin)
-
-```bash
-curl -s http://localhost:8000/api/payments/1/confirm \
-  -H "Authorization: Bearer $TOKEN" \
-  -X POST | python -m json.tool
-```
-
-Expected: `{"message": "Payment confirmed and account credited.", "new_balance": 700.0}`
-
-### 7. Verify the audit chain
-
-```bash
-curl -s http://localhost:8000/api/audit/logs/verify \
-  -H "Authorization: Bearer $TOKEN" | python -m json.tool
-```
-
-Expected: `{"valid": true, "message": "Audit log chain is intact.", "entries": <n>}`
-
-### 8. View the analytics dashboard
-
-```bash
-curl -s "http://localhost:8000/api/analytics/kpis" \
+curl -s http://localhost:8001/api/analytics/kpis \
   -H "Authorization: Bearer $TOKEN" | python -m json.tool
 ```
 
 Expected: JSON object with `kpis.conversion_rate`, `kpis.dispute_rate`, etc.
 
+### 4. Verify the audit-log chain
+
+```bash
+curl -s http://localhost:8001/api/audit/logs/verify \
+  -H "Authorization: Bearer $TOKEN" | python -m json.tool
+```
+
+Expected: `{"valid": true, "message": "Audit log chain is intact.", ...}`
+
+### 5. UI smoke check
+
+1. Open http://localhost:8001/ in a browser.
+2. Log in as **`demo_user` / `User@Demo123!`**.
+3. You should land on the Dashboard with the user's name in the top right.
+4. Navigate to **Find Peers** — HTMX-powered peer search should render.
+5. Log out; repeat with `admin` — admin-only menu items appear on the sidebar.
+
 ---
 
-## Running Without Docker (Local Development)
+## End-to-end flow (offline payments + ledger)
 
-### Prerequisites
-
-- Python 3.11 or later
-- pip
-
-### Setup
+The following flow exercises the core value path using only the demo
+accounts that exist on a freshly started container:
 
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+# 1. Grab an admin token
+ADMIN=$(curl -s http://localhost:8001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin@Demo123!"}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
-# 2. Start the development server (auto-creates instance/config.json on first run)
-#    Linux / macOS:
-python3 run.py
-#    Windows (cmd or PowerShell):
-py -3 run.py
+# 2. Grab a user token
+USER=$(curl -s http://localhost:8001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"demo_user","password":"User@Demo123!"}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# 3. Submit an offline payment as the user
+curl -s http://localhost:8001/api/payments/submit \
+  -H "Authorization: Bearer $USER" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount":200,"payment_type":"check","reference_number":"CHK-00001"}' \
+  | python -m json.tool
+# → { "payment_id": 1, "signature": "<64-char hex>" }
+
+# 4. Admin confirms the payment (credits the user account)
+curl -s -X POST http://localhost:8001/api/payments/1/confirm \
+  -H "Authorization: Bearer $ADMIN" | python -m json.tool
+# → { "message": "Payment confirmed and account credited.", "new_balance": ... }
 ```
 
-The app listens on `http://127.0.0.1:5000` by default.
-Override host/port with environment variables:
+---
 
-```bash
-# Linux / macOS
-PORT=8000 HOST=0.0.0.0 python3 run.py
+## API Endpoint Summary
 
-# Windows PowerShell
-$env:PORT=8000; $env:HOST="0.0.0.0"; py -3 run.py
-```
+All REST endpoints are prefixed with `/api/`. The frontend SPA is served at
+`/` (catch-all route rendering the SPA shell).
 
-### First-time setup
-
-On startup the app:
-1. Creates `instance/config.json` with auto-generated secrets (SECRET_KEY, ENCRYPTION_KEY, PAYMENT_SIGNING_KEY, ADMIN_BOOTSTRAP_PASSWORD).
-2. Initialises `instance/app.db` (SQLite).
-3. Seeds the default admin account (`admin` / value of `ADMIN_BOOTSTRAP_PASSWORD`).
-
-No SQL imports or manual configuration required.
-
-### Verify the server is running
-
-```bash
-# Read bootstrap password (Linux / macOS)
-BOOTSTRAP_PW=$(python3 -c "import json; print(json.load(open('instance/config.json'))['ADMIN_BOOTSTRAP_PASSWORD'])")
-
-# Confirm the API responds
-curl -s http://127.0.0.1:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$BOOTSTRAP_PW\"}" \
-  | python3 -m json.tool
-
-# Windows (PowerShell) — read password and hit /api/auth/me with a token
-$pw = (Get-Content instance\config.json | ConvertFrom-Json).ADMIN_BOOTSTRAP_PASSWORD
-$r  = Invoke-RestMethod http://127.0.0.1:5000/api/auth/login `
-        -Method POST -ContentType "application/json" `
-        -Body "{`"username`":`"admin`",`"password`":`"$pw`"}"
-Invoke-RestMethod http://127.0.0.1:5000/api/auth/me `
-  -Headers @{Authorization="Bearer $($r.token)"}
-```
-
-### Cross-platform notes
-
-| Platform | Start command | Override port |
-|----------|---------------|---------------|
-| Linux / macOS | `python3 run.py` | `PORT=8000 python3 run.py` |
-| Windows (cmd) | `py -3 run.py` | `set PORT=8000 && py -3 run.py` |
-| Windows (PowerShell) | `py -3 run.py` | `$env:PORT=8000; py -3 run.py` |
+| Prefix                                            | Description                                    |
+|---------------------------------------------------|------------------------------------------------|
+| `POST /api/auth/register`                         | Register a new user                            |
+| `POST /api/auth/login`                            | Login (sets httpOnly cookie + returns JWT)     |
+| `GET  /api/auth/me`                               | Get current user profile                       |
+| `POST /api/auth/logout`                           | Logout (clears httpOnly cookie)                |
+| `GET  /api/users`                                 | List users (admin only)                        |
+| `GET  /api/ledger/balance`                        | Check credit balance                           |
+| `POST /api/ledger/credit`                         | Credit a user (admin only)                     |
+| `POST /api/ledger/transfer`                       | Peer credit transfer                           |
+| `POST /api/ledger/invoices`                       | Create an invoice                              |
+| `POST /api/payments/submit`                       | Submit offline payment                         |
+| `POST /api/payments/<id>/confirm`                 | Confirm payment and credit account (admin)     |
+| `POST /api/payments/<id>/refund`                  | Refund a confirmed payment (admin)             |
+| `GET  /api/ledger/ar-summary`                     | Accounts Receivable summary (admin/auditor)    |
+| `GET  /api/ledger/ap-summary`                     | Accounts Payable summary (admin/auditor)       |
+| `GET  /api/ledger/reconciliation-summary`         | Invoice ↔ ledger reconciliation                |
+| `GET  /api/audit/logs`                            | Audit log listing (admin/auditor)              |
+| `GET  /api/audit/logs/verify`                     | SHA-256 chain integrity check                  |
+| `GET  /api/analytics/kpis`                        | KPI dashboard                                  |
+| `GET  /api/analytics/export`                      | CSV export (kpi or daily)                      |
+| `GET  /api/analytics/reports`                     | List saved daily reports                       |
+| `GET  /api/analytics/reports/<date>`              | Download a specific daily report CSV           |
+| `POST /api/admin/violations`                      | Report a violation                             |
+| `PUT  /api/admin/users/<id>/ban`                  | Ban a user                                     |
+| `PUT  /api/admin/users/<id>/unban`                | Unban a user                                   |
+| `GET  /api/admin/resources`                       | List schedule inventory resources              |
+| `POST /api/admin/resources`                       | Create schedule inventory resource             |
+| `PUT  /api/admin/resources/<id>`                  | Update schedule inventory resource             |
+| `DELETE /api/admin/resources/<id>`                | Deactivate schedule inventory resource         |
+| `PUT  /api/admin/permissions/<admin_id>/<res>`    | Grant a permission on `<res>`                  |
+| `DELETE /api/admin/permissions/<admin_id>/<res>`  | Revoke a permission on `<res>`                 |
+| `GET  /api/matching/search`                       | Search peers by skill / tag / time slot        |
+| `POST /api/matching/profile`                      | Create matching profile                        |
+| `PUT  /api/matching/profile`                      | Upsert matching profile                        |
+| `GET  /api/matching/profile`                      | Get matching profile                           |
+| `POST /api/matching/queue`                        | Join the auto-match queue                      |
+| `GET  /api/matching/queue`                        | List queue entries (scoped by role)            |
+| `PUT  /api/matching/queue/<id>/cancel`            | Cancel a waiting queue entry                   |
+| `POST /api/matching/sessions`                     | Request a session with a peer                  |
+| `GET  /api/matching/sessions`                     | List sessions for the current user             |
+| `GET  /api/matching/peers-partial`                | HTMX: peer search HTML fragment                |
+| `GET  /api/matching/queue/<id>/status-partial`    | HTMX: queue status polling fragment            |
+| `GET  /api/matching/sessions-partial`             | HTMX: session table HTML fragment              |
+| `GET  /<path:path>`                               | SPA catch-all (renders `templates/index.html`) |
 
 ---
 
 ## Running Tests
 
+All test suites run inside the same Docker stack — no local Python/Node
+install is required.
+
 ```bash
 bash run_tests.sh
 ```
 
-The script installs dependencies if needed, then runs:
-- **Unit tests** in `unit_tests/` — service logic, hash chaining, HMAC verification, state transitions, boundary conditions, matching governance
-- **API tests** in `API_tests/` — every REST endpoint, RBAC enforcement, error responses, matching governance API boundaries
-- **Frontend tests** in `frontend_tests/` — SPA shell validation, HTMX partial endpoint responses, core UI flow states
+The script invokes, in order:
 
-### Browser E2E smoke test (Playwright)
+1. **Unit tests** — `docker compose run --rm api pytest unit_tests/`
+   (service logic, hash chaining, HMAC verification, state transitions,
+    boundary conditions, matching governance).
+2. **API tests** — `docker compose run --rm api pytest API_tests/`
+   (every REST endpoint, RBAC enforcement, validation error bodies,
+    matching governance).
+3. **Frontend tests** — `docker compose run --rm api pytest frontend_tests/`
+   (SPA shell validation, HTMX partial endpoints, core UI flow states).
+4. **Client-side JS unit tests** — `docker compose run --rm js-unit`
+   (Vitest + happy-dom; covers every major `static/js/` module:
+    `api.js`, `app.js`, `auth.js`, `admin.js`, `dashboard.js`, `ledger.js`,
+    `matching.js`, `verification.js`, `utils.js`).
+5. **Browser E2E smoke** — `docker compose run --rm e2e`
+   (Playwright: login → queue → status poll → logout).
 
-A dedicated browser E2E suite is available in `e2e_tests/` to cover browser-only behavior.
+Each suite is idempotent; a fresh temp database is used per Pytest session.
 
-```bash
-# Install JS test dependencies
-npm install
+---
 
-# Install Chromium used by Playwright
-npx playwright install chromium
+## Environment variables (Docker)
 
-# Run browser smoke flow: login -> queue -> status poll -> logout
-npm run test:e2e
-```
-
-Notes:
-- By default Playwright starts the Flask server automatically using `run.py`.
-- To target an already running server, set `PEX_E2E_USE_EXTERNAL_SERVER=1` and (optionally) `BASE_URL`.
-- If your local admin password was already rotated to a custom value, set `PEX_ADMIN_PASSWORD` before running the E2E test.
-
-Tests are idempotent and use isolated in-memory / temp databases. No manual setup required.
-
-### Running individual suites
-
-```bash
-# Unit tests only
-py -3 -m pytest unit_tests/ -v
-
-# API tests only
-py -3 -m pytest API_tests/ -v
-
-# Frontend tests only
-py -3 -m pytest frontend_tests/ -v
-
-# Matching-specific tests
-py -3 -m pytest unit_tests/test_matching.py API_tests/test_matching_api.py frontend_tests/test_ui.py -v
-
-# Browser E2E only
-npm run test:e2e
-```
-
-### Scheduler 2:00 AM ops check
-
-To validate the real-clock scheduler behavior in CI/staging after 2:00 AM local time:
-
-```bash
-PEX_BASE_URL=http://127.0.0.1:5000 \
-PEX_ADMIN_USER=admin \
-PEX_ADMIN_PASSWORD='<admin password>' \
-python scripts/check_daily_scheduler_firing.py
-```
-
-The check passes only when the latest saved daily report date equals yesterday.
+| Variable                         | Default           | Effect                                     |
+|----------------------------------|-------------------|--------------------------------------------|
+| `PEX_ADMIN_BOOTSTRAP_PASSWORD`   | `Admin@Demo123!`  | Password for the seeded `admin` account    |
+| `PEX_DEMO_AUDITOR_PASSWORD`      | `Auditor@Demo123!`| Password for the seeded `auditor` account  |
+| `PEX_DEMO_USER_PASSWORD`         | `User@Demo123!`   | Password for the seeded `demo_user` account|
+| `PEX_SEED_DEMO_USERS`            | `1` (Docker)      | Seed auditor + demo_user on startup        |
+| `PEX_FORCE_PASSWORD_ROTATION`    | `0` (Docker)      | Force admin to rotate on first login       |
+| `PEX_SESSION_COOKIE_SECURE`      | `0` (Docker)      | Enable only when running behind HTTPS      |
 
 ---
 
@@ -375,190 +279,89 @@ repo/
 │   └── utils.py        # Crypto, hashing, JWT, decorators
 ├── unit_tests/         # Pytest unit tests (service + DAL layer)
 ├── API_tests/          # Pytest API tests (Flask test client)
-├── static/             # Frontend assets (CSS, JS)
+├── frontend_tests/     # Pytest frontend tests (HTMX + SPA shell)
+├── static/
+│   ├── js/             # SPA source modules (api.js, app.js, …)
+│   │   └── __tests__/  # Vitest client-side unit tests
+│   └── css/            # SPA stylesheet
 ├── templates/          # SPA entry point (index.html)
-├── config.py           # Auto-generated secrets + runtime config
+├── e2e_tests/          # Playwright browser E2E specs
+├── config.py           # Deterministic secrets + runtime config
 ├── run.py              # Application entry point
-├── requirements.txt    # Python dependencies
+├── requirements.txt    # Python dependencies (used inside Docker image)
+├── package.json        # Node dev-deps (Vitest + Playwright)
 ├── Dockerfile
 ├── docker-compose.yml
-└── run_tests.sh        # One-command test runner
+└── run_tests.sh        # One-command test runner (all suites, Docker-only)
 ```
 
 ---
 
 ## Financial Summary Endpoints (AR / AP / Reconciliation)
 
-All three endpoints require **admin or auditor** role. Every access is audit-logged under
-`AR_SUMMARY_ACCESSED`, `AP_SUMMARY_ACCESSED`, or `RECONCILIATION_ACCESSED`.
+All three endpoints require **admin or auditor** role. Every access is
+audit-logged under `AR_SUMMARY_ACCESSED`, `AP_SUMMARY_ACCESSED`, or
+`RECONCILIATION_ACCESSED`.
 
 ### GET /api/ledger/ar-summary — Accounts Receivable
 
-Returns outstanding amounts owed **to** users as invoice issuers (status: `issued` / `overdue`).
+Returns outstanding amounts owed **to** users as invoice issuers
+(status: `issued` / `overdue`).
 
-**Query parameters**
-
-| Parameter   | Type   | Description                                       |
-|-------------|--------|---------------------------------------------------|
-| `from_date` | string | ISO-8601 lower bound on `issued_at` (optional)    |
-| `to_date`   | string | ISO-8601 upper bound on `issued_at` (optional)    |
-| `issuer_id` | int    | Restrict to a single issuer (optional)            |
-
-**Sample request**
+| Parameter   | Type   | Description                                    |
+|-------------|--------|------------------------------------------------|
+| `from_date` | string | ISO-8601 lower bound on `issued_at` (optional) |
+| `to_date`   | string | ISO-8601 upper bound on `issued_at` (optional) |
+| `issuer_id` | int    | Restrict to a single issuer (optional)         |
 
 ```bash
-TOKEN=<admin-or-auditor-jwt>
-
-curl -s "http://localhost:8000/api/ledger/ar-summary" \
-  -H "Authorization: Bearer $TOKEN" | python -m json.tool
+curl -s 'http://localhost:8001/api/ledger/ar-summary' \
+  -H "Authorization: Bearer $ADMIN" | python -m json.tool
 ```
-
-**Sample response**
-
-```json
-{
-  "generated_at": "2026-04-08T10:00:00+00:00",
-  "filters": { "from_date": null, "to_date": null, "issuer_id": null },
-  "totals": {
-    "invoice_count": 3,
-    "total_invoiced": 750.0,
-    "total_outstanding": 600.0,
-    "overdue_amount": 200.0,
-    "overdue_count": 1
-  },
-  "by_status": {
-    "issued":  { "count": 2, "outstanding_amount": 400.0 },
-    "overdue": { "count": 1, "outstanding_amount": 200.0 }
-  },
-  "by_issuer": [
-    {
-      "issuer_id": 2, "issuer_name": "alice",
-      "invoice_count": 3, "total_invoiced": 750.0,
-      "total_outstanding": 600.0, "overdue_count": 1, "overdue_amount": 200.0
-    }
-  ]
-}
-```
-
----
 
 ### GET /api/ledger/ap-summary — Accounts Payable
 
-Returns outstanding amounts owed **by** users as invoice payers (status: `issued` / `overdue`).
-
-**Query parameters**
-
-| Parameter   | Type   | Description                                       |
-|-------------|--------|---------------------------------------------------|
-| `from_date` | string | ISO-8601 lower bound on `issued_at` (optional)    |
-| `to_date`   | string | ISO-8601 upper bound on `issued_at` (optional)    |
-| `payer_id`  | int    | Restrict to a single payer (optional)             |
-
-**Sample request**
-
-```bash
-curl -s "http://localhost:8000/api/ledger/ap-summary?payer_id=3" \
-  -H "Authorization: Bearer $TOKEN" | python -m json.tool
-```
-
-**Sample response**
-
-```json
-{
-  "generated_at": "2026-04-08T10:00:00+00:00",
-  "filters": { "from_date": null, "to_date": null, "payer_id": 3 },
-  "totals": {
-    "invoice_count": 2,
-    "total_owed": 400.0,
-    "overdue_amount": 200.0,
-    "overdue_count": 1
-  },
-  "by_status": {
-    "issued":  { "count": 1, "amount_owed": 200.0 },
-    "overdue": { "count": 1, "amount_owed": 200.0 }
-  },
-  "by_payer": [
-    {
-      "payer_id": 3, "payer_name": "bob",
-      "invoice_count": 2, "total_owed": 400.0,
-      "overdue_count": 1, "overdue_amount": 200.0
-    }
-  ]
-}
-```
-
----
+Returns outstanding amounts owed **by** users as invoice payers
+(status: `issued` / `overdue`). Accepts the same date bounds plus an
+optional `payer_id` filter.
 
 ### GET /api/ledger/reconciliation-summary — Reconciliation
 
-Cross-checks every paid/refunded invoice against the immutable ledger to detect
-amount mismatches. A record is **reconciled** when the payer's debit ledger entry
-and the issuer's credit ledger entry each equal the original invoice amount.
-
-**Query parameters**
-
-| Parameter   | Type   | Description                                       |
-|-------------|--------|---------------------------------------------------|
-| `from_date` | string | ISO-8601 lower bound on `paid_at` (optional)      |
-| `to_date`   | string | ISO-8601 upper bound on `paid_at` (optional)      |
-
-**Sample request**
-
-```bash
-curl -s "http://localhost:8000/api/ledger/reconciliation-summary" \
-  -H "Authorization: Bearer $TOKEN" | python -m json.tool
-```
-
-**Sample response**
-
-```json
-{
-  "generated_at": "2026-04-08T10:00:00+00:00",
-  "filters": { "from_date": null, "to_date": null },
-  "totals": {
-    "invoices_examined": 5,
-    "total_invoiced": 1250.0,
-    "total_collected": 1100.0
-  },
-  "reconciliation": {
-    "reconciled": 5,
-    "discrepant": 0,
-    "unmatched":  0
-  },
-  "discrepancies": []
-}
-```
-
-A non-empty `discrepancies` list means an invoice was marked paid but its ledger
-entries are missing or have wrong amounts — this would indicate data integrity issues
-requiring investigation.
+Cross-checks every paid/refunded invoice against the immutable ledger to
+detect amount mismatches. A non-empty `discrepancies` list means an invoice
+was marked paid but its ledger entries are missing or have wrong amounts —
+this indicates a data integrity issue requiring investigation.
 
 ---
 
 ## Ledger / Audit Immutability (DB Triggers)
 
-In addition to application-layer INSERT-only conventions, **SQLite `BEFORE UPDATE`
-and `BEFORE DELETE` triggers** are installed on `ledger_entries` and `audit_logs`.
-Any attempt to modify or remove a row raises:
+In addition to application-layer INSERT-only conventions, **SQLite
+`BEFORE UPDATE` and `BEFORE DELETE` triggers** are installed on
+`ledger_entries` and `audit_logs`. Any attempt to modify or remove a row
+raises:
 
 ```
 IMMUTABLE VIOLATION: UPDATE on ledger_entries is forbidden.
 Ledger records are append-only; use a correcting entry instead.
 ```
 
-The triggers are created with `IF NOT EXISTS` and are applied on every app startup
-via `init_db()`, so they are present in both new and existing databases.
+The triggers are created with `IF NOT EXISTS` and applied on every app
+startup via `init_db()`, so they are present in both new and existing
+databases.
 
 ---
 
 ## Security Notes
 
-- All passwords hashed with PBKDF2-SHA256 (600,000 iterations)
-- Seeded admin uses generated local bootstrap password and forced first-login rotation
-- JWTs signed with HS256, expire after 24 hours
-- Session cookie uses httpOnly + SameSite=Strict and `Secure` outside localhost HTTP
-- Identity documents encrypted with AES-256-GCM
-- Offline payment records signed with HMAC-SHA256
-- Audit log entries form a tamper-evident SHA-256 hash chain (+ DB triggers)
-- Ledger entries form a tamper-evident SHA-256 hash chain (+ DB triggers)
-- No external API calls — fully offline compliant
+- Passwords hashed with PBKDF2-SHA256 (600,000 iterations).
+- Seeded admin defaults to `Admin@Demo123!` in Docker demo mode; override
+  with `PEX_ADMIN_BOOTSTRAP_PASSWORD` for production.
+- JWTs signed with HS256, expire after 24 hours.
+- Session cookie uses `httpOnly` + `SameSite=Strict` (and `Secure` outside
+  localhost HTTP).
+- Identity documents encrypted with AES-256-GCM.
+- Offline payment records signed with HMAC-SHA256.
+- Audit log entries form a tamper-evident SHA-256 hash chain (+ DB triggers).
+- Ledger entries form a tamper-evident SHA-256 hash chain (+ DB triggers).
+- No external API calls — fully offline compliant.

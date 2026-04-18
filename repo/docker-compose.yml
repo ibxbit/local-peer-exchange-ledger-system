@@ -17,6 +17,11 @@ services:
       # (POST succeeds, cookie dropped, next API call 401s, SPA reloads to
       # login). Set this to 1 (or unset it) when deploying behind HTTPS.
       - PEX_SESSION_COOKIE_SECURE=0
+      # Deterministic demo credentials matching README.md so newcomers can
+      # log in immediately without scraping instance/config.json.
+      - PEX_ADMIN_BOOTSTRAP_PASSWORD=Admin@Demo123!
+      - PEX_FORCE_PASSWORD_ROTATION=0
+      - PEX_SEED_DEMO_USERS=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"]

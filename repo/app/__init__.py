@@ -29,6 +29,8 @@ def create_app() -> Flask:
     with app.app_context():
         init_db()
         _seed_admin()
+        if Config.SEED_DEMO_USERS:
+            _seed_demo_users()
 
     # Register blueprints from the new routes layer
     from app.routes.auth         import auth_bp
@@ -87,3 +89,36 @@ def _seed_admin():
             (Config.ADMIN_SEED_USERNAME, Config.ADMIN_SEED_EMAIL,
              hash_password(Config.ADMIN_SEED_PASSWORD), 'admin', must_change, now, now)
         )
+
+
+def _seed_demo_users():
+    """
+    Seed deterministic auditor + user accounts with the credentials documented
+    in README.md. Idempotent: only inserts rows that do not already exist.
+    Credentials come from Config.DEMO_AUDITOR_* / DEMO_USER_* (overridable via
+    environment variables).
+    """
+    from app.models import db
+    from app.utils import hash_password, utcnow
+    roster = [
+        (Config.DEMO_AUDITOR_USERNAME, Config.DEMO_AUDITOR_EMAIL,
+         Config.DEMO_AUDITOR_PASSWORD, 'auditor', 500.0),
+        (Config.DEMO_USER_USERNAME, Config.DEMO_USER_EMAIL,
+         Config.DEMO_USER_PASSWORD, 'user', 500.0),
+    ]
+    with db() as conn:
+        for username, email, password, role, balance in roster:
+            existing = conn.execute(
+                'SELECT id FROM users WHERE username = ?', (username,)
+            ).fetchone()
+            if existing:
+                continue
+            now = utcnow()
+            conn.execute(
+                'INSERT INTO users (username, email, password_hash, role, '
+                'is_active, credit_balance, must_change_password, '
+                'created_at, updated_at) '
+                'VALUES (?, ?, ?, ?, 1, ?, 0, ?, ?)',
+                (username, email, hash_password(password), role,
+                 balance, now, now),
+            )

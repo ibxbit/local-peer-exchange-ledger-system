@@ -41,11 +41,18 @@ echo ""
 echo "------------------------------------------------------------"
 echo "  API TESTS  (API_tests/)"
 echo "------------------------------------------------------------"
-# API_tests include test_auth_cookie which asserts the Secure flag is set
-# when the request arrives from a non-local host. The api service runs with
-# PEX_SESSION_COOKIE_SECURE=0 for E2E browser tests (plain HTTP), so we
-# re-enable the flag here for the API-test container only.
-docker compose run --rm -e PEX_SESSION_COOKIE_SECURE=1 api pytest API_tests/ \
+# API_tests include:
+#   - test_auth_cookie        → asserts Secure flag is set for non-local hosts
+#   - test_security_hardening → asserts FORCE_PASSWORD_ROTATION blocks routes
+# The api service runs with PEX_SESSION_COOKIE_SECURE=0 and
+# PEX_FORCE_PASSWORD_ROTATION=0 in docker-compose.yml so the demo login flow
+# stays frictionless (cookies drop on plain HTTP; rotation prompt breaks the
+# docs). Re-enable both flags for the API-test container only so the
+# security assertions exercise their production code paths.
+docker compose run --rm \
+    -e PEX_SESSION_COOKIE_SECURE=1 \
+    -e PEX_FORCE_PASSWORD_ROTATION=1 \
+    api pytest API_tests/ \
     -v \
     --tb=short \
     --no-header \

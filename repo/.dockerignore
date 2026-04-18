@@ -1,0 +1,12 @@
+# Keep the image free of any host-side developer state so the container
+# initialises its database and config from scratch on first boot.
+instance/
+.pytest_cache/
+.tmp/
+__pycache__/
+**/__pycache__/
+*.pyc
+node_modules/
+test-results/
+.git/
+.claude/
